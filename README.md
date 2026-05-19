@@ -114,6 +114,30 @@ Type: command
 Command: npx skill-dispatcher --skills-dir /path/to/skills
 ```
 
+## Local model compatibility
+
+The dispatcher is a **pure MCP server** — it communicates via JSON-RPC over stdio. It does not depend on any specific AI model, API key, or cloud service. This means it works identically with:
+
+- **Local models** via Ollama, LM Studio, llama.cpp, GPT4All
+- **Cloud models** via OpenAI, Anthropic, Google, OpenRouter
+- **Any MCP-compatible client** (opencode, Claude Desktop, Cursor, Windsurf, Continue.dev)
+
+The model never talks to the dispatcher directly — the MCP client (e.g., opencode) handles all communication. The dispatcher simply receives JSON-RPC messages and returns responses, regardless of what model is driving the conversation.
+
+To use with a local model in opencode:
+```jsonc
+{
+  "model": "ollama/llama3.2",          // local model
+  "mcp": {
+    "skill-dispatcher": {
+      "type": "local",
+      "command": ["npx", "skill-dispatcher", "--skills-dir", "/path/to/skills"],
+      "enabled": true
+    }
+  }
+}
+```
+
 ## Trigger matching
 
 The dispatcher normalizes both your query and skill triggers before matching:
