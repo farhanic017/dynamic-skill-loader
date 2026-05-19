@@ -6,6 +6,24 @@ An MCP server that loads AI coding skills **on-demand** by matching **trigger ke
 
 Stop loading 50+ skills at startup. Only load what you need, when you need it.
 
+---
+
+## 📥 Drop-in repo URL install
+
+Drop this URL into your AI assistant for fully automatic installation:
+
+```
+https://github.com/farhanic017/dynamic-skill-loader-for-opencode
+```
+
+Your AI will clone the repo, run `python install.py`, which detects your AI
+client (opencode, Claude Desktop, Cursor), configures the MCP server, and
+creates sample skills — all automatically.
+
+---
+
+
+
 ## How it works
 
 ```
