@@ -39,6 +39,8 @@ Returns: gsap-core, gsap-scrolltrigger, frontend-design
 You call get_skill("gsap-core") → full instructions loaded
 ```
 
+![skill-dispatcher demo](skill-dispatcher-demo.gif)
+
 **4 tools:**
 
 | Tool | What it does |
