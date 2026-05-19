@@ -1,6 +1,6 @@
 # Dynamic Skill Loader for OpenCode (and any MCP-compatible AI tool)
 
-> Created by [Farhan Khan](https://github.com/farhanic017) — [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader-for-opencode/issues)
+> Created by [Farhan Dhrubo](https://github.com/farhanic017) — [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader-for-opencode/issues)
 
 An MCP server that loads AI coding skills **on-demand** by matching **trigger keywords** against your task — just like Claude Code's built-in skill system. Works with **OpenCode**, **Claude Desktop**, **Cursor**, and any MCP-compatible client.
 
@@ -150,4 +150,4 @@ MIT — see [LICENSE](./LICENSE).
 - Remove or alter the copyright notice
 - Claim authorship of this project
 
-© 2026 Farhan Khan. All rights reserved. Unauthorized re-uploading or plagiarism of this work is not permitted.
+© 2026 Farhan Dhrubo. All rights reserved. Unauthorized re-uploading or plagiarism of this work is not permitted.
