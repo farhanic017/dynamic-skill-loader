@@ -6,13 +6,30 @@ import { createInterface } from 'readline';
 
 const args = process.argv.slice(2);
 let SKILLS_DIR = './skills';
+let cliMode = null;
+let cliArg = '';
+
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--skills-dir' || args[i] === '-s') {
     SKILLS_DIR = args[i + 1] || SKILLS_DIR;
     i++;
+  } else if (args[i] === '--list' || args[i] === '-l') {
+    cliMode = 'list';
+  } else if (args[i] === '--match' || args[i] === '-m') {
+    cliMode = 'match';
+    cliArg = args[i + 1] || '';
+    i++;
+  } else if (args[i] === '--get' || args[i] === '-g') {
+    cliMode = 'get';
+    cliArg = args[i + 1] || '';
+    i++;
+  } else if (args[i] === '--help' || args[i] === '-h') {
+    cliMode = 'help';
   }
 }
 SKILLS_DIR = resolve(SKILLS_DIR);
+
+// ── YAML Frontmatter Parser ──────────────────────────────────────
 
 function parseFrontmatter(text) {
   const result = {};
@@ -89,10 +106,15 @@ function parseSkillMd(content) {
   };
 }
 
+// ── Skill Index ──────────────────────────────────────────────────
+
 const skills = [];
 
 function indexSkills() {
-  if (!existsSync(SKILLS_DIR)) return;
+  if (!existsSync(SKILLS_DIR)) {
+    console.error(`Skills directory not found: ${SKILLS_DIR}`);
+    return;
+  }
   const entries = readdirSync(SKILLS_DIR, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -108,6 +130,87 @@ function indexSkills() {
 }
 
 indexSkills();
+
+// ── Matching Logic ───────────────────────────────────────────────
+
+function matchSkills(query) {
+  const q = query.toLowerCase();
+  return skills.filter(s => {
+    if (s.name.toLowerCase().includes(q)) return true;
+    if ((s.description || '').toLowerCase().includes(q)) return true;
+    if (s.triggers.some(t => t.toLowerCase().includes(q) || q.includes(t.toLowerCase()))) return true;
+    return false;
+  });
+}
+
+// ── CLI Mode ─────────────────────────────────────────────────────
+
+if (cliMode) {
+  switch (cliMode) {
+    case 'help':
+      console.log(`
+skill-dispatcher — On-demand skill loader for AI coding assistants
+
+USAGE:
+  # MCP server mode (for AI tools like opencode, Claude, Cursor)
+  skill-dispatcher --skills-dir ./skills
+
+  # CLI mode (direct terminal use)
+  skill-dispatcher --skills-dir ./skills --list
+  skill-dispatcher --skills-dir ./skills --match "animation gsap"
+  skill-dispatcher --skills-dir ./skills --get gsap-core
+
+OPTIONS:
+  -s, --skills-dir <path>   Path to skills directory (default: ./skills)
+  -l, --list                List all available skills
+  -m, --match <query>       Match skills by trigger keywords
+  -g, --get <name>          Get full content of a specific skill
+  -h, --help                Show this help
+`);
+      process.exit(0);
+
+    case 'list':
+      if (skills.length === 0) {
+        console.log('No skills found in', SKILLS_DIR);
+        process.exit(0);
+      }
+      console.log(`\n  ${skills.length} skills in ${SKILLS_DIR}\n`);
+      for (const s of skills) {
+        const desc = (s.description || '').split('\n')[0].slice(0, 70);
+        console.log(`  ${s.name.padEnd(22)} ${desc}`);
+      }
+      console.log();
+      process.exit(0);
+
+    case 'match': {
+      const matched = matchSkills(cliArg);
+      if (matched.length === 0) {
+        console.log(`\n  No skills matched "${cliArg}"\n`);
+        process.exit(0);
+      }
+      console.log(`\n  ${matched.length} skill(s) matched "${cliArg}":\n`);
+      for (const s of matched) {
+        console.log(`  ${s.name}`);
+        console.log(`  ${(s.description || '').split('\n')[0].slice(0, 80)}`);
+        console.log(`  Triggers: ${s.triggers.join(', ') || '—'}`);
+        console.log();
+      }
+      process.exit(0);
+    }
+
+    case 'get': {
+      const skill = skills.find(s => s.name === cliArg || s.id === cliArg);
+      if (!skill) {
+        console.log(`\n  Skill "${cliArg}" not found\n`);
+        process.exit(1);
+      }
+      console.log(skill.fullContent);
+      process.exit(0);
+    }
+  }
+}
+
+// ── MCP Server Mode (default) ───────────────────────────────────
 
 const rl = createInterface({ input: process.stdin, terminal: false });
 
@@ -142,7 +245,7 @@ rl.on('line', (line) => {
           tools: [
             {
               name: 'match_skills',
-              description: 'Match skills against your current task using trigger keywords. Call this at the START of every task to discover which skills are relevant.',
+              description: 'Match skills against your current task using trigger keywords. Call at the START of every task to discover relevant skills on-demand.',
               inputSchema: {
                 type: 'object',
                 properties: {
@@ -153,7 +256,7 @@ rl.on('line', (line) => {
             },
             {
               name: 'get_skill',
-              description: 'Load the full content of a skill by name. Call after match_skills to get complete instructions for a matched skill.',
+              description: 'Load the full content of a skill by name. Call after match_skills to load complete instructions for a matched skill.',
               inputSchema: {
                 type: 'object',
                 properties: {
@@ -180,12 +283,7 @@ rl.on('line', (line) => {
               respond(id, { content: [{ type: 'text', text: `No query. All ${skills.length} skills available — use \`list_skills\` to browse.` }] });
               break;
             }
-            const matched = skills.filter(s => {
-              if (s.name.toLowerCase().includes(query)) return true;
-              if ((s.description || '').toLowerCase().includes(query)) return true;
-              if (s.triggers.some(t => t.toLowerCase().includes(query) || query.includes(t.toLowerCase()))) return true;
-              return false;
-            });
+            const matched = matchSkills(query);
             if (matched.length === 0) {
               respond(id, { content: [{ type: 'text', text: `No skills matched "${query}".\n\nAvailable: ${skills.map(s => s.name).join(', ')}` }] });
               break;

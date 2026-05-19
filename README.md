@@ -130,11 +130,45 @@ triggers:                # Keywords that activate this skill
 Instructions, examples, API docs...
 ```
 
-## CLI options
+## CLI modes
+
+### MCP server mode (default)
+
+Run without action flags to start the MCP server. AI tools connect to this via stdio:
+
+```bash
+skill-dispatcher --skills-dir ./skills
+```
+
+### Direct terminal mode
+
+Use action flags to query skills directly from your terminal:
+
+```bash
+# List all skills
+skill-dispatcher --skills-dir ./skills --list
+
+# Match skills by trigger keywords
+skill-dispatcher --skills-dir ./skills --match "animation gsap"
+
+# Get full skill content
+skill-dispatcher --skills-dir ./skills --get gsap-core
+
+# Show help
+skill-dispatcher --help
+```
+
+This makes it useful in shell scripts, CI/CD pipelines, or any workflow where you need to discover and load skills programmatically.
+
+## Options
 
 | Flag | Alias | Default | Description |
 |------|-------|---------|-------------|
 | `--skills-dir` | `-s` | `./skills` | Path to skills directory |
+| `--list` | `-l` | — | List all available skills |
+| `--match` | `-m` | — | Match skills by trigger keywords (requires a query) |
+| `--get` | `-g` | — | Get full content of a specific skill (requires name) |
+| `--help` | `-h` | — | Show help |
 
 ## License
 
