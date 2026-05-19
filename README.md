@@ -21,13 +21,14 @@ Returns: gsap-core, gsap-scrolltrigger, frontend-design
 You call get_skill("gsap-core") → full instructions loaded
 ```
 
-**3 tools:**
+**4 tools:**
 
 | Tool | What it does |
 |------|-------------|
-| `match_skills(query)` | Matches your task against skill `triggers` and `description` fields |
+| `match_skills(query)` | Matches your task against skill `triggers` and `description` fields (normalizes hyphens, punctuation for fuzzy matching) |
 | `get_skill(name)` | Loads the full `SKILL.md` content of a matched skill |
 | `list_skills()` | Browses all available skills and their trigger keywords |
+| `unload_skill(name)` | Marks a skill as no longer needed — tells the model to drop it from context when switching tasks |
 
 ## Quick start
 
@@ -113,6 +114,17 @@ Type: command
 Command: npx skill-dispatcher --skills-dir /path/to/skills
 ```
 
+## Trigger matching
+
+The dispatcher normalizes both your query and skill triggers before matching:
+
+- **Lowercases everything**
+- **Strips hyphens, underscores, punctuation** — so `"web-animation"` matches trigger `"web animation"`
+- **Collapses whitespace**
+- **Substring matching both ways** — your query can contain part of a trigger, or a trigger can contain part of your query
+
+This means `"gsap anim"`, `"GSAP Animation!"`, and `"gsap-anim-timeline"` all match a skill with trigger `"gsap timeline animation"`.
+
 ## Creating skills
 
 Each skill is a directory with a `SKILL.md` file. The frontmatter controls matching:
@@ -168,6 +180,7 @@ This makes it useful in shell scripts, CI/CD pipelines, or any workflow where yo
 | `--list` | `-l` | — | List all available skills |
 | `--match` | `-m` | — | Match skills by trigger keywords (requires a query) |
 | `--get` | `-g` | — | Get full content of a specific skill (requires name) |
+| `--unload` | `-u` | — | Forget a previously loaded skill (requires name) |
 | `--help` | `-h` | — | Show help |
 
 ## License

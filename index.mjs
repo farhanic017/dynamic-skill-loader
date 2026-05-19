@@ -15,6 +15,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+// ── All internal logging goes to stderr (never stdout) to protect MCP's JSON-RPC stream ──
+
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { createInterface } from 'readline';
@@ -38,13 +40,29 @@ for (let i = 0; i < args.length; i++) {
     cliMode = 'get';
     cliArg = args[i + 1] || '';
     i++;
+  } else if (args[i] === '--unload' || args[i] === '-u') {
+    cliMode = 'unload';
+    cliArg = args[i + 1] || '';
+    i++;
   } else if (args[i] === '--help' || args[i] === '-h') {
     cliMode = 'help';
   }
 }
 SKILLS_DIR = resolve(SKILLS_DIR);
 
+// ── Normalizer for trigger matching ──────────────────────────────
+// Strips punctuation, hyphens, underscores, collapses whitespace
+
+function normalize(str) {
+  return str
+    .toLowerCase()
+    .replace(/[-_\/\\.,;:!?@#$%^&*()\[\]{}|`~'"+=<>]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // ── YAML Frontmatter Parser ──────────────────────────────────────
+// Each unhandled file is caught, logged to stderr, and skipped
 
 function parseFrontmatter(text) {
   const result = {};
@@ -127,7 +145,7 @@ const skills = [];
 
 function indexSkills() {
   if (!existsSync(SKILLS_DIR)) {
-    console.error(`Skills directory not found: ${SKILLS_DIR}`);
+    console.error(`[skill-dispatcher] Skills directory not found: ${SKILLS_DIR}`);
     return;
   }
   const entries = readdirSync(SKILLS_DIR, { withFileTypes: true });
@@ -135,25 +153,39 @@ function indexSkills() {
     if (!entry.isDirectory()) continue;
     const dir = join(SKILLS_DIR, entry.name);
     const mdPath = join(dir, 'SKILL.md');
-    if (!existsSync(mdPath)) continue;
+    if (!existsSync(mdPath)) {
+      console.error(`[skill-dispatcher] Skipping ${entry.name}: no SKILL.md found`);
+      continue;
+    }
     try {
       const content = readFileSync(mdPath, 'utf-8');
       const meta = parseSkillMd(content);
-      if (meta) skills.push({ id: entry.name, dir, ...meta, fullContent: content });
-    } catch { /* skip */ }
+      if (meta) {
+        skills.push({ id: entry.name, dir, ...meta, fullContent: content });
+      } else {
+        console.error(`[skill-dispatcher] Skipping ${entry.name}: invalid YAML frontmatter (missing --- delimiters)`);
+      }
+    } catch (err) {
+      console.error(`[skill-dispatcher] Skipping ${entry.name}: ${err.message}`);
+    }
   }
+  console.error(`[skill-dispatcher] Loaded ${skills.length} skills from ${SKILLS_DIR}`);
 }
 
 indexSkills();
 
 // ── Matching Logic ───────────────────────────────────────────────
+// Normalizes both query and triggers to catch hyphens, punctuation, etc.
 
 function matchSkills(query) {
-  const q = query.toLowerCase();
+  const q = normalize(query);
   return skills.filter(s => {
-    if (s.name.toLowerCase().includes(q)) return true;
-    if ((s.description || '').toLowerCase().includes(q)) return true;
-    if (s.triggers.some(t => t.toLowerCase().includes(q) || q.includes(t.toLowerCase()))) return true;
+    if (normalize(s.name).includes(q)) return true;
+    if (normalize(s.description || '').includes(q)) return true;
+    if (s.triggers.some(t => {
+      const tn = normalize(t);
+      return tn.includes(q) || q.includes(tn);
+    })) return true;
     return false;
   });
 }
@@ -180,6 +212,7 @@ OPTIONS:
   -l, --list                List all available skills
   -m, --match <query>       Match skills by trigger keywords
   -g, --get <name>          Get full content of a specific skill
+  -u, --unload <name>       Forget a previously loaded skill
   -h, --help                Show this help
 `);
       process.exit(0);
@@ -222,10 +255,16 @@ OPTIONS:
       console.log(skill.fullContent);
       process.exit(0);
     }
+
+    case 'unload':
+      console.log(`Skill "${cliArg}" marked as unloaded. No-op in stateless mode — the model controls its own context.`);
+      process.exit(0);
   }
 }
 
 // ── MCP Server Mode (default) ───────────────────────────────────
+// All responses go to stdout via process.stdout.write (JSON-RPC).
+// Everything else — diagnostics, warnings, debug — goes to stderr.
 
 const rl = createInterface({ input: process.stdin, terminal: false });
 
@@ -241,7 +280,10 @@ rl.on('line', (line) => {
   line = line.trim();
   if (!line) return;
   let msg;
-  try { msg = JSON.parse(line); } catch { return; }
+  try { msg = JSON.parse(line); } catch {
+    console.error(`[skill-dispatcher] Malformed JSON-RPC message ignored`);
+    return;
+  }
   const { id, method, params } = msg;
   if (id === undefined || id === null) return;
 
@@ -285,6 +327,17 @@ rl.on('line', (line) => {
               description: 'List all available skills with descriptions and trigger keywords.',
               inputSchema: { type: 'object', properties: {} },
             },
+            {
+              name: 'unload_skill',
+              description: 'Mark a skill as no longer relevant to the current task. Call this when you move on to a different task and no longer need a previously loaded skill in context.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', description: 'Skill name to unload (e.g., "gsap-core")' },
+                },
+                required: ['name'],
+              },
+            },
           ],
         });
         break;
@@ -293,14 +346,19 @@ rl.on('line', (line) => {
         const { name, arguments: args } = params;
         switch (name) {
           case 'match_skills': {
-            const query = (args?.query || '').toLowerCase();
+            const rawQuery = args?.query || '';
+            const query = rawQuery.toLowerCase();
             if (!query) {
-              respond(id, { content: [{ type: 'text', text: `No query. All ${skills.length} skills available — use \`list_skills\` to browse.` }] });
+              respond(id, {
+                content: [{ type: 'text', text: `No query. All ${skills.length} skills available — use \`list_skills\` to browse.` }],
+              });
               break;
             }
             const matched = matchSkills(query);
             if (matched.length === 0) {
-              respond(id, { content: [{ type: 'text', text: `No skills matched "${query}".\n\nAvailable: ${skills.map(s => s.name).join(', ')}` }] });
+              respond(id, {
+                content: [{ type: 'text', text: `No skills matched "${rawQuery}".\n\nAvailable: ${skills.map(s => s.name).join(', ')}` }],
+              });
               break;
             }
             const text = matched.map(s =>
@@ -309,7 +367,7 @@ rl.on('line', (line) => {
             respond(id, {
               content: [{
                 type: 'text',
-                text: `**${matched.length} skill(s)** matched "${query}":\n\n${text}\n\nCall \`get_skill\` with a name to load its full content.`,
+                text: `**${matched.length} skill(s)** matched "${rawQuery}":\n\n${text}\n\nCall \`get_skill\` with a name to load its full content.`,
               }],
             });
             break;
@@ -319,7 +377,9 @@ rl.on('line', (line) => {
             const skillName = args?.name || '';
             const skill = skills.find(s => s.name === skillName || s.id === skillName);
             if (!skill) {
-              respond(id, { content: [{ type: 'text', text: `Skill "${skillName}" not found.\nAvailable: ${skills.map(s => s.name).join(', ')}` }] });
+              respond(id, {
+                content: [{ type: 'text', text: `Skill "${skillName}" not found.\nAvailable: ${skills.map(s => s.name).join(', ')}` }],
+              });
               break;
             }
             respond(id, { content: [{ type: 'text', text: skill.fullContent }] });
@@ -327,8 +387,30 @@ rl.on('line', (line) => {
           }
 
           case 'list_skills': {
-            const text = skills.map(s => `- **${s.name}**: ${(s.description || 'No description').split('\n')[0]}`).join('\n');
-            respond(id, { content: [{ type: 'text', text: `**${skills.length} skills installed**\n\n${text}` }] });
+            const text = skills.map(s =>
+              `- **${s.name}**: ${(s.description || 'No description').split('\n')[0]}`
+            ).join('\n');
+            respond(id, {
+              content: [{ type: 'text', text: `**${skills.length} skills installed**\n\n${text}` }],
+            });
+            break;
+          }
+
+          case 'unload_skill': {
+            const skillName = args?.name || '';
+            const skill = skills.find(s => s.name === skillName || s.id === skillName);
+            if (!skill) {
+              respond(id, {
+                content: [{ type: 'text', text: `Skill "${skillName}" not found. Nothing to unload.` }],
+              });
+              break;
+            }
+            respond(id, {
+              content: [{
+                type: 'text',
+                text: `**${skill.name}** unloaded. Stop using this skill's instructions for the remainder of the conversation unless re-triggered.`,
+              }],
+            });
             break;
           }
 
@@ -346,6 +428,7 @@ rl.on('line', (line) => {
         respondError(id, -32601, `Method not found: ${method}`);
     }
   } catch (err) {
+    console.error(`[skill-dispatcher] Error handling ${method}: ${err.message}`);
     respondError(id, -32603, err.message);
   }
 });
