@@ -24,13 +24,16 @@ def pixel_squid(draw, cx, cy, scale=1.0, blink=False, arm_up=False, holding=Fals
     body_dark = "#D9547D"
     body_light = "#FF8FB3"
 
-    # Tentacles
-    for i, offset in enumerate([-30, -18, -6, 6, 18, 30]):
+    # Tentacles (lines emerging from body bottom with small rounded tips)
+    for i, offset in enumerate([-18, -9, 0, 9, 18]):
         tx = cx + offset * s
-        ty = cy + 20 * s
-        wave = math.sin(i * 0.8 + tilt) * 8 * s
+        base_y = cy + 26 * s
+        wave = math.sin(i * 0.8 + tilt) * 6 * s
+        tip_x = tx + math.sin(i * 0.6 + tilt) * 4 * s
+        tip_y = base_y + 12 * s + wave
         col = body_dark if i % 2 == 0 else body_color
-        draw.ellipse([tx-6*s, ty-4*s, tx+6*s, ty+12*s + wave], fill=col)
+        draw.line([tx, base_y, tip_x, tip_y], fill=col, width=3)
+        draw.ellipse([tip_x-3*s, tip_y-3*s, tip_x+3*s, tip_y+3*s], fill=col)
 
     # Body
     draw.ellipse([cx-30*s, cy-28*s, cx+30*s, cy+28*s], fill=body_color)
