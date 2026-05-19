@@ -1,0 +1,36 @@
+{
+  "name": "skill-dispatcher",
+  "version": "1.0.0",
+  "description": "On-demand skill loader for AI coding assistants. Load skills by trigger keywords — like Claude Code's skill system, for any MCP-compatible tool.",
+  "type": "module",
+  "bin": {
+    "skill-dispatcher": "./index.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "skills",
+    "claude-code",
+    "opencode",
+    "cursor",
+    "ai-coding",
+    "coding-assistant",
+    "skill-loader",
+    "trigger-matching"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farhanic017/dynamic-skill-loader-for-opencode"
+  },
+  "homepage": "https://github.com/farhanic017/dynamic-skill-loader-for-opencode",
+  "author": "Farhan Khan (@farhanic017)",
+  "files": [
+    "index.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

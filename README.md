@@ -1,0 +1,153 @@
+# Dynamic Skill Loader for OpenCode (and any MCP-compatible AI tool)
+
+> Created by [Farhan Khan](https://github.com/farhanic017) — [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader-for-opencode/issues)
+
+An MCP server that loads AI coding skills **on-demand** by matching **trigger keywords** against your task — just like Claude Code's built-in skill system. Works with **OpenCode**, **Claude Desktop**, **Cursor**, and any MCP-compatible client.
+
+Stop loading 50+ skills at startup. Only load what you need, when you need it.
+
+## How it works
+
+```
+You: "build a hero section with GSAP animations"
+       │
+       ▼
+skill-dispatcher matches triggers
+       │
+       ▼
+Returns: gsap-core, gsap-scrolltrigger, frontend-design
+       │
+       ▼
+You call get_skill("gsap-core") → full instructions loaded
+```
+
+**3 tools:**
+
+| Tool | What it does |
+|------|-------------|
+| `match_skills(query)` | Matches your task against skill `triggers` and `description` fields |
+| `get_skill(name)` | Loads the full `SKILL.md` content of a matched skill |
+| `list_skills()` | Browses all available skills and their trigger keywords |
+
+## Quick start
+
+### 1. Install
+
+```bash
+npm install -g skill-dispatcher
+```
+
+Or run directly with npx:
+
+```bash
+npx skill-dispatcher --skills-dir ./my-skills
+```
+
+### 2. Point it at your skills
+
+Your skills should follow the Claude Code skill format — each skill is a directory with a `SKILL.md` file containing YAML frontmatter:
+
+```markdown
+---
+name: gsap-core
+description: Core GSAP animation library
+triggers:
+  - "gsap"
+  - "web animation"
+  - "tween"
+  - "easing"
+---
+# gsap-core
+Full skill instructions here...
+```
+
+### 3. Add to your AI tool
+
+#### opencode
+
+Add to `opencode.jsonc`:
+
+```jsonc
+{
+  "instructions": ["path/to/instructions.md"],
+  "mcp": {
+    "skill-dispatcher": {
+      "type": "local",
+      "command": ["npx", "skill-dispatcher", "--skills-dir", "/path/to/skills"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Create `instructions.md`:
+
+```markdown
+## Skills
+Skills are NOT pre-loaded. At the start of every task, call `match_skills`
+with your task description to load relevant skills on-demand.
+```
+
+#### Claude Desktop
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "skill-dispatcher": {
+      "command": "npx",
+      "args": ["skill-dispatcher", "--skills-dir", "/path/to/skills"]
+    }
+  }
+}
+```
+
+#### Cursor
+
+Add in Cursor's MCP server settings:
+
+```
+Name: skill-dispatcher
+Type: command
+Command: npx skill-dispatcher --skills-dir /path/to/skills
+```
+
+## Creating skills
+
+Each skill is a directory with a `SKILL.md` file. The frontmatter controls matching:
+
+```yaml
+---
+name: my-skill          # Display name
+description: |           # Matched against your query
+  What this skill does
+triggers:                # Keywords that activate this skill
+  - "keyword1"
+  - "keyword2"
+---
+# Full markdown content
+Instructions, examples, API docs...
+```
+
+## CLI options
+
+| Flag | Alias | Default | Description |
+|------|-------|---------|-------------|
+| `--skills-dir` | `-s` | `./skills` | Path to skills directory |
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
+
+**You are free to:**
+- Use this in your own projects
+- Fork and modify for personal use
+- Share with attribution
+
+**You may NOT:**
+- Re-upload this to other marketplaces, package managers, or code hosts as your own work
+- Remove or alter the copyright notice
+- Claim authorship of this project
+
+© 2026 Farhan Khan. All rights reserved. Unauthorized re-uploading or plagiarism of this work is not permitted.
