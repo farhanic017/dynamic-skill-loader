@@ -20,51 +20,55 @@ def rounded_box(draw, x, y, w, h, color, r=8):
 
 def pixel_squid(draw, cx, cy, scale=1.0, blink=False, arm_up=False, holding=False, tilt=0):
     s = scale
-    body_color = "#FF6B9D"
-    body_dark = "#D9547D"
-    body_light = "#FF8FB3"
+    # Magenta/red palette — Claude style
+    c_outer = "#CC2255"
+    c_body  = "#E63870"
+    c_highlight = "#FF5588"
+    c_glow  = "#FF8FB3"
 
-    # Tentacles (lines emerging from body bottom with small rounded tips)
-    for i, offset in enumerate([-18, -9, 0, 9, 18]):
+    # Outer ring (Claude's circular badge style)
+    draw.ellipse([cx-32*s, cy-30*s, cx+32*s, cy+30*s], fill=c_outer)
+
+    # Inner body
+    draw.ellipse([cx-28*s, cy-26*s, cx+28*s, cy+26*s], fill=c_body)
+
+    # Highlight arc (top-left glow like Claude's gradient)
+    draw.ellipse([cx-22*s, cy-24*s, cx-6*s, cy-14*s], fill=c_highlight)
+    draw.ellipse([cx-20*s, cy-22*s, cx-2*s, cy-6*s], fill=c_glow)
+
+    # Tentacles (small, neat — emerging from below the ring)
+    for i, offset in enumerate([-16, -8, 0, 8, 16]):
         tx = cx + offset * s
-        base_y = cy + 26 * s
-        wave = math.sin(i * 0.8 + tilt) * 6 * s
-        tip_x = tx + math.sin(i * 0.6 + tilt) * 4 * s
-        tip_y = base_y + 12 * s + wave
-        col = body_dark if i % 2 == 0 else body_color
+        base_y = cy + 28 * s
+        wave = math.sin(i * 0.8 + tilt) * 5 * s
+        tip_x = tx + math.sin(i * 0.6 + tilt) * 3 * s
+        tip_y = base_y + 10 * s + wave
+        col = c_outer if i % 2 == 0 else c_body
         draw.line([tx, base_y, tip_x, tip_y], fill=col, width=3)
         draw.ellipse([tip_x-3*s, tip_y-3*s, tip_x+3*s, tip_y+3*s], fill=col)
 
-    # Body
-    draw.ellipse([cx-30*s, cy-28*s, cx+30*s, cy+28*s], fill=body_color)
-    draw.ellipse([cx-18*s, cy-22*s, cx-4*s, cy-8*s], fill=body_light)
-
-    # Eyes
-    eye_y = cy - 10*s
+    # Eyes — simple dots (Claude-minimal)
+    eye_y = cy - 6*s
     if blink:
-        draw.line([cx-16*s, eye_y, cx-8*s, eye_y], fill="#2C3E50", width=3)
-        draw.line([cx+8*s, eye_y, cx+16*s, eye_y], fill="#2C3E50", width=3)
+        draw.line([cx-12*s, eye_y, cx-6*s, eye_y], fill="#FFF", width=3)
+        draw.line([cx+6*s, eye_y, cx+12*s, eye_y], fill="#FFF", width=3)
     else:
-        draw.ellipse([cx-18*s, eye_y-6*s, cx-6*s, eye_y+6*s], fill="white")
-        draw.ellipse([cx-14*s, eye_y-3*s, cx-8*s, eye_y+3*s], fill="#2C3E50")
-        draw.ellipse([cx-13*s, eye_y-1*s, cx-10*s, eye_y+1*s], fill="white")
-        draw.ellipse([cx+6*s, eye_y-6*s, cx+18*s, eye_y+6*s], fill="white")
-        draw.ellipse([cx+8*s, eye_y-3*s, cx+14*s, eye_y+3*s], fill="#2C3E50")
-        draw.ellipse([cx+10*s, eye_y-1*s, cx+13*s, eye_y+1*s], fill="white")
+        draw.ellipse([cx-14*s, eye_y-5*s, cx-4*s, eye_y+5*s], fill="white")
+        draw.ellipse([cx-12*s, eye_y-3*s, cx-6*s, eye_y+3*s], fill="#1A1A2E")
+        draw.ellipse([cx-11*s, eye_y-1*s, cx-8*s, eye_y+1*s], fill="white")
+        draw.ellipse([cx+4*s, eye_y-5*s, cx+14*s, eye_y+5*s], fill="white")
+        draw.ellipse([cx+6*s, eye_y-3*s, cx+12*s, eye_y+3*s], fill="#1A1A2E")
+        draw.ellipse([cx+8*s, eye_y-1*s, cx+11*s, eye_y+1*s], fill="white")
 
     # Smile
-    draw.arc([cx-8*s, cy-2*s, cx+8*s, cy+10*s], 0, 180, fill="#D9547D", width=2)
-
-    # Blush
-    draw.ellipse([cx-28*s, cy+2*s, cx-20*s, cy+8*s], fill="rgba(255,100,100,80)")
-    draw.ellipse([cx+20*s, cy+2*s, cx+28*s, cy+8*s], fill="rgba(255,100,100,80)")
+    draw.arc([cx-6*s, cy+2*s, cx+6*s, cy+12*s], 0, 180, fill="#FFF", width=2)
 
     if arm_up:
-        arm_color = "#E8608A"
-        draw.ellipse([cx+28*s, cy-26*s, cx+38*s, cy-20*s], fill=arm_color)
-        draw.line([cx+34*s, cy-26*s, cx+34*s, cy-40*s], fill=arm_color, width=4)
+        arm_color = "#CC2255"
+        draw.ellipse([cx+28*s, cy-26*s, cx+36*s, cy-20*s], fill=arm_color)
+        draw.line([cx+32*s, cy-26*s, cx+32*s, cy-40*s], fill=arm_color, width=4)
         if holding:
-            draw.ellipse([cx+28*s, cy-48*s, cx+40*s, cy-38*s], fill="#E74C3C")
+            draw.ellipse([cx+26*s, cy-48*s, cx+38*s, cy-38*s], fill="#FF5588")
 
 def draw_terminal(draw, x, y, w, h, lines, cursor_line=-1, cursor_pos=-1):
     rounded_box(draw, x, y, w, h, "#0D1117")
