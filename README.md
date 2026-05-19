@@ -172,16 +172,9 @@ This makes it useful in shell scripts, CI/CD pipelines, or any workflow where yo
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+GNU General Public License v3.0 — see [LICENSE](./LICENSE).
 
-**You are free to:**
-- Use this in your own projects
-- Fork and modify for personal use
-- Share with attribution
+This program is free software: you can redistribute and/or modify it under the terms of the GPLv3.
+Modified versions must be licensed under GPLv3 with clear attribution to the original author.
 
-**You may NOT:**
-- Re-upload this to other marketplaces, package managers, or code hosts as your own work
-- Remove or alter the copyright notice
-- Claim authorship of this project
-
-© 2026 Farhan Dhrubo. All rights reserved. Unauthorized re-uploading or plagiarism of this work is not permitted.
+© 2026 Farhan Dhrubo.
