@@ -39,7 +39,7 @@ Returns: gsap-core, gsap-scrolltrigger, frontend-design
 You call get_skill("gsap-core") → full instructions loaded
 ```
 
-![skill-dispatcher demo](skill-dispatcher-demo.gif)
+<img src="skill-dispatcher-demo.gif" alt="skill-dispatcher demo" width="100%" style="max-width:720px; display:block; margin:24px auto; border-radius:12px;">
 
 **4 tools:**
 
