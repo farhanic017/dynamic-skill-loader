@@ -163,7 +163,11 @@ Works with **any model** — local (Ollama, LM Studio, llama.cpp) or cloud
 (OpenAI, Anthropic, Google, OpenRouter). The MCP client handles all
 communication; the dispatcher just returns JSON-RPC responses.
 
-## License
+## Copyright & License
 
-GNU General Public License v3.0 — see [LICENSE](./LICENSE).
-© 2026 Farhan Dhrubo.
+**Copyright (c) 2026 Farhan Dhrubo** — All rights reserved.
+Licensed under **GNU General Public License v3.0**.
+See [LICENSE](./LICENSE) and [NOTICE](./NOTICE) for full terms.
+
+**You may NOT** remove copyright notices, re-distribute as your own work,
+or sell without attribution. All files contain embedded copyright headers.

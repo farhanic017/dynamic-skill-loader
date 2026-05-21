@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
+#  Dynamic Skill Loader for OpenCode  ───  Demo GIF Generator
+#  Copyright (c) 2026 Farhan Dhrubo  <farhaiee123@gmail.com>
+#  License: GPL-3.0  —  https://github.com/farhanic017/dynamic-skill-loader-for-opencode
+#
+#  This program is free software. You may NOT remove this notice,
+#  re-distribute as your own work, or sell without attribution.
+# =============================================================================
+
 """
 Generate a cute pixel squid animated GIF showing skill-dispatcher workflow.
-Copyright (C) 2026 Farhan Dhrubo
 """
 
 from PIL import Image, ImageDraw, ImageFont

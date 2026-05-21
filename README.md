@@ -1,3 +1,7 @@
+[![License](https://img.shields.io/badge/license-GPLv3-purple)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Node.js%2018%2B-green)]()
+[![Author](https://img.shields.io/badge/author-Farhan%20Dhrubo-red)](https://github.com/farhanic017)
+
 # Dynamic Skill Loader for OpenCode (and any MCP-compatible AI tool)
 
 > Created by [Farhan Dhrubo](https://github.com/farhanic017) — [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader-for-opencode/issues)
@@ -227,11 +231,45 @@ This makes it useful in shell scripts, CI/CD pipelines, or any workflow where yo
 | `--unload` | `-u` | — | Forget a previously loaded skill (requires name) |
 | `--help` | `-h` | — | Show help |
 
-## License
+## Project Structure
 
-GNU General Public License v3.0 — see [LICENSE](./LICENSE).
+```
+skill-dispatcher/
+├── index.mjs             # MCP server & CLI (skill matching engine)
+├── install.py            # Auto-installer
+├── test.mjs              # Test suite (27 tests, all passing)
+├── make_gif.py           # Demo GIF generator
+├── SKILL.md              # AI agent installation instructions
+├── README.md             # This file
+├── LICENSE               # GPL-3.0
+├── NOTICE                # Copyright and legal notices
+├── package.json          # npm metadata (GPL-3.0)
+└── .gitignore
+```
 
-This program is free software: you can redistribute and/or modify it under the terms of the GPLv3.
-Modified versions must be licensed under GPLv3 with clear attribution to the original author.
+---
 
-© 2026 Farhan Dhrubo.
+## Copyright & License
+
+**Copyright (c) 2026 Farhan Dhrubo** — All rights reserved.
+
+This project is licensed under the **GNU General Public License v3.0**.
+See [LICENSE](./LICENSE) and [NOTICE](./NOTICE) for full details.
+
+**You may NOT:**
+- Remove or alter any copyright notice in any file
+- Re-distribute this software or any derivative as your own work
+  without clear attribution to the original author
+- Sell this software or any derivative without explicit permission
+
+**Required attribution:** Any use, distribution, or derivative work MUST include:
+"Originally created by Farhan Dhrubo (github.com/farhanic017)"
+
+Every source file in this repository contains an embedded copyright notice
+making the origin unambiguous. The GPL-3.0 license ensures all derivative
+works remain open-source and properly attributed.
+
+---
+
+*Built with Node.js, MCP, and the conviction that 50+ skills should not
+load at startup.*

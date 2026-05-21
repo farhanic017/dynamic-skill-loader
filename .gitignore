@@ -1,4 +1,41 @@
+# Node
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# State & secrets
+data/state.json
+state.json
 .env
-*.log
+.env.local
+*.key
+*.pem
+
+# OS
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# Python (for install.py)
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Temp / generated
+*.log
+*.tmp
+temp/

@@ -1,30 +1,26 @@
 #!/usr/bin/env node
-// Dynamic Skill Loader for OpenCode
-// Copyright (C) 2026 Farhan Dhrubo
-// 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-// 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-// 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//  Dynamic Skill Loader for OpenCode  ───  On-Demand MCP Skill Server
+//  Copyright (c) 2026 Farhan Dhrubo  <farhaiee123@gmail.com>
+//  License: GPL-3.0  —  https://github.com/farhanic017/dynamic-skill-loader-for-opencode
+//
+//  This program is free software. You may NOT remove this notice,
+//  re-distribute as your own work, or sell without attribution.
+// =============================================================================
 
 // ── All internal logging goes to stderr (never stdout) to protect MCP's JSON-RPC stream ──
 
-import { readFileSync, readdirSync, existsSync } from 'fs';
-import { join, resolve } from 'path';
+import { readFileSync, readdirSync, existsSync, realpathSync } from 'fs';
+import { join, resolve, relative } from 'path';
 import { createInterface } from 'readline';
+
+const VERSION = '1.1.0';
+const APP_NAME = 'skill-dispatcher';
 
 const args = process.argv.slice(2);
 let SKILLS_DIR = './skills';
 let cliMode = null;
 let cliArg = '';
+let BASE_DIR; // set after first resolve for path traversal checks
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--skills-dir' || args[i] === '-s') {
@@ -44,11 +40,14 @@ for (let i = 0; i < args.length; i++) {
     cliMode = 'unload';
     cliArg = args[i + 1] || '';
     i++;
+  } else if (args[i] === '--version' || args[i] === '-v') {
+    cliMode = 'version';
   } else if (args[i] === '--help' || args[i] === '-h') {
     cliMode = 'help';
   }
 }
 SKILLS_DIR = resolve(SKILLS_DIR);
+BASE_DIR = SKILLS_DIR;
 
 // ── Normalizer for trigger matching ──────────────────────────────
 // Strips punctuation, hyphens, underscores, collapses whitespace
@@ -143,6 +142,21 @@ function parseSkillMd(content) {
 
 const skills = [];
 
+function isPathSafe(targetPath) {
+  try {
+    const resolved = resolve(targetPath);
+    const rel = relative(BASE_DIR, resolved);
+    return !rel.startsWith('..') && !rel.startsWith('/') && !/^[a-zA-Z]:[\\/]/.test(rel) && resolved.startsWith(BASE_DIR);
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeSkillName(name) {
+  if (typeof name !== 'string') return '';
+  return name.replace(/[^a-zA-Z0-9._\-\/]/g, '').slice(0, 200);
+}
+
 function indexSkills() {
   if (!existsSync(SKILLS_DIR)) {
     console.error(`[skill-dispatcher] Skills directory not found: ${SKILLS_DIR}`);
@@ -151,7 +165,12 @@ function indexSkills() {
   const entries = readdirSync(SKILLS_DIR, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith('.')) continue;
     const dir = join(SKILLS_DIR, entry.name);
+    if (!isPathSafe(dir)) {
+      console.error(`[skill-dispatcher] Skipping ${entry.name}: path traversal detected`);
+      continue;
+    }
     const mdPath = join(dir, 'SKILL.md');
     if (!existsSync(mdPath)) {
       console.error(`[skill-dispatcher] Skipping ${entry.name}: no SKILL.md found`);
@@ -160,7 +179,7 @@ function indexSkills() {
     try {
       const content = readFileSync(mdPath, 'utf-8');
       const meta = parseSkillMd(content);
-      if (meta) {
+      if (meta && meta.name) {
         skills.push({ id: entry.name, dir, ...meta, fullContent: content });
       } else {
         console.error(`[skill-dispatcher] Skipping ${entry.name}: invalid YAML frontmatter (missing --- delimiters)`);
@@ -194,18 +213,24 @@ function matchSkills(query) {
 
 if (cliMode) {
   switch (cliMode) {
+    case 'version':
+      console.log(`${APP_NAME} v${VERSION}`);
+      console.log(`License: GPL-3.0  Copyright (c) 2026 Farhan Dhrubo`);
+      console.log(`https://github.com/farhanic017/dynamic-skill-loader-for-opencode`);
+      process.exit(0);
+
     case 'help':
       console.log(`
-skill-dispatcher — On-demand skill loader for AI coding assistants
+${APP_NAME} v${VERSION} — On-demand skill loader for AI coding assistants
 
 USAGE:
   # MCP server mode (for AI tools like opencode, Claude, Cursor)
-  skill-dispatcher --skills-dir ./skills
+  ${APP_NAME} --skills-dir ./skills
 
   # CLI mode (direct terminal use)
-  skill-dispatcher --skills-dir ./skills --list
-  skill-dispatcher --skills-dir ./skills --match "animation gsap"
-  skill-dispatcher --skills-dir ./skills --get gsap-core
+  ${APP_NAME} --skills-dir ./skills --list
+  ${APP_NAME} --skills-dir ./skills --match "animation gsap"
+  ${APP_NAME} --skills-dir ./skills --get gsap-core
 
 OPTIONS:
   -s, --skills-dir <path>   Path to skills directory (default: ./skills)
@@ -213,6 +238,7 @@ OPTIONS:
   -m, --match <query>       Match skills by trigger keywords
   -g, --get <name>          Get full content of a specific skill
   -u, --unload <name>       Forget a previously loaded skill
+  -v, --version             Show version and copyright
   -h, --help                Show this help
 `);
       process.exit(0);
@@ -266,6 +292,8 @@ OPTIONS:
 // All responses go to stdout via process.stdout.write (JSON-RPC).
 // Everything else — diagnostics, warnings, debug — goes to stderr.
 
+const MAX_INPUT_SIZE = 1024 * 100; // 100KB limit per message
+
 const rl = createInterface({ input: process.stdin, terminal: false });
 
 function respond(id, result) {
@@ -277,6 +305,10 @@ function respondError(id, code, message) {
 }
 
 rl.on('line', (line) => {
+  if (line.length > MAX_INPUT_SIZE) {
+    console.error(`[skill-dispatcher] Message exceeds ${MAX_INPUT_SIZE} bytes, ignored`);
+    return;
+  }
   line = line.trim();
   if (!line) return;
   let msg;
@@ -284,8 +316,16 @@ rl.on('line', (line) => {
     console.error(`[skill-dispatcher] Malformed JSON-RPC message ignored`);
     return;
   }
+  if (!msg || typeof msg !== 'object') {
+    console.error(`[skill-dispatcher] Invalid message type`);
+    return;
+  }
   const { id, method, params } = msg;
   if (id === undefined || id === null) return;
+  if (method && typeof method !== 'string') {
+    respondError(id, -32600, 'Invalid method type');
+    return;
+  }
 
   try {
     switch (method) {
@@ -374,7 +414,11 @@ rl.on('line', (line) => {
           }
 
           case 'get_skill': {
-            const skillName = args?.name || '';
+            const skillName = sanitizeSkillName(args?.name || '');
+            if (!skillName) {
+              respond(id, { content: [{ type: 'text', text: 'Skill name is required.' }] });
+              break;
+            }
             const skill = skills.find(s => s.name === skillName || s.id === skillName);
             if (!skill) {
               respond(id, {
@@ -397,7 +441,11 @@ rl.on('line', (line) => {
           }
 
           case 'unload_skill': {
-            const skillName = args?.name || '';
+            const skillName = sanitizeSkillName(args?.name || '');
+            if (!skillName) {
+              respond(id, { content: [{ type: 'text', text: 'Skill name is required.' }] });
+              break;
+            }
             const skill = skills.find(s => s.name === skillName || s.id === skillName);
             if (!skill) {
               respond(id, {

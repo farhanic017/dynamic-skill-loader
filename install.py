@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""
-Dynamic Skill Loader for OpenCode — Auto-Installer
-Copyright (C) 2026 Farhan Dhrubo
+#  Dynamic Skill Loader for OpenCode  ───  Auto-Installer
+#  Copyright (c) 2026 Farhan Dhrubo  <farhaiee123@gmail.com>
+#  License: GPL-3.0  —  https://github.com/farhanic017/dynamic-skill-loader-for-opencode
+#
+#  This program is free software. You may NOT remove this notice,
+#  re-distribute as your own work, or sell without attribution.
+# =============================================================================
 
+"""
 Drop this repo URL into your AI assistant and it will automatically
 run this script to clone, install, and configure everything.
 
