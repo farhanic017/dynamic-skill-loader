@@ -418,6 +418,19 @@ function getSkillFamily(name) {
   return [name];
 }
 
+/**
+ * Format a concise family summary to avoid O(n) name listings for large families.
+ * Returns e.g. "part of design family (49 related)" or empty string if alone.
+ */
+function formatFamilySummary(skillName) {
+  const family = getSkillFamily(skillName);
+  if (family.length <= 1) return '';
+  const others = family.filter(n => n !== skillName);
+  const count = others.length;
+  if (count <= 3) return `Family: ${others.join(', ')}`;
+  return `Family: ${others.slice(0, 3).join(', ')}, and ${count - 3} more`;
+}
+
 // ── CLI Mode ─────────────────────────────────────────────────────
 
 if (cliMode) {
@@ -475,10 +488,8 @@ OPTIONS:
         console.log(`  ${s.name}${active}`);
         console.log(`  ${(s.description || '').split('\n')[0].slice(0, 80)}`);
         console.log(`  Triggers: ${s.triggers.join(', ') || '—'}`);
-        const family = getSkillFamily(s.name);
-        if (family.length > 1) {
-          console.log(`  Family: ${family.filter(n => n !== s.name).join(', ')}`);
-        }
+        const famStr = formatFamilySummary(s.name);
+        if (famStr) console.log(`  ${famStr}`);
         console.log();
       }
       process.exit(0);
@@ -673,9 +684,9 @@ rl.on('line', (line) => {
             }
             const text = matched.map(s => {
               const active = activeSkills.has(s.name) ? ' **[ACTIVE]**' : '';
-              const family = getSkillFamily(s.name);
-              const familyStr = family.length > 1 ? `\nSkill family: ${family.filter(n => n !== s.name).join(', ')}` : '';
-              return `### ${s.name}${active}\n**${s.description || 'No description'}**\nTriggers: ${s.triggers.join(', ') || '—'}${familyStr}`;
+              const familyStr = formatFamilySummary(s.name);
+              const familyLine = familyStr ? `\n${familyStr}` : '';
+              return `### ${s.name}${active}\n**${s.description || 'No description'}**\nTriggers: ${s.triggers.join(', ') || '—'}${familyLine}`;
             }).join('\n\n');
             const staleNote = currentTaskContext.description
               ? `\n\n_Context: "${currentTaskContext.description}". Call \`set_task_context\` if switching tasks._`
@@ -704,9 +715,9 @@ rl.on('line', (line) => {
             }
             activeSkills.get(skill.name).callCount++;
 
-            const family = getSkillFamily(skill.name);
-            const familyNote = family.length > 1
-              ? `\n\n**Skill family:** ${family.filter(n => n !== skill.name).join(', ')}\n_Related skills share triggers — consider loading them too._`
+            const famStr = formatFamilySummary(skill.name);
+            const familyNote = famStr
+              ? `\n\n**${famStr}**\n_Related skills share triggers — consider loading them too._`
               : '';
 
             respond(id, {
@@ -738,9 +749,9 @@ rl.on('line', (line) => {
             const skillName = args?.name || '';
             if (activeSkills.has(skillName)) {
               activeSkills.delete(skillName);
-              const family = getSkillFamily(skillName);
-              const familyNote = family.length > 1
-                ? `\n_Related skills in same family: ${family.filter(n => n !== skillName).join(', ')}. Unload them too if not needed._`
+              const famStr = formatFamilySummary(skillName);
+              const familyNote = famStr
+                ? `\n_${famStr}. Unload them too if not needed._`
                 : '';
               respond(id, {
                 content: [{
