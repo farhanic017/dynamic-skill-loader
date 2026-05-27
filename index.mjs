@@ -60,6 +60,31 @@ SKILLS_DIR = resolve(SKILLS_DIR);
 const activeSkills = new Map(); // name → { loadedAt: Date, callCount: number }
 let currentTaskContext = { description: '', setAt: null };
 
+// ── Workspace scope ─────────────────────────────────────────────
+// null = all skills searchable; array = only named skills visible to match/list
+let workspaceScope = null;
+
+function getScopedSkills() {
+  if (!workspaceScope) return skills;
+  return skills.filter(s => workspaceScope.includes(s.name));
+}
+
+function setWorkspaceScope(scope) {
+  if (!scope || scope.length === 0) { workspaceScope = null; return; }
+  const valid = scope.map(n => n.toLowerCase().trim()).filter(n => skills.some(s =>
+    s.name.toLowerCase() === n || (s.triggers || []).some(t => t.toLowerCase() === n)
+  ));
+  if (valid.length === 0) { workspaceScope = null; return; }
+  // Resolve trigger names to skill names
+  const resolved = new Set();
+  for (const v of valid) {
+    const exact = skills.find(s => s.name.toLowerCase() === v);
+    if (exact) { resolved.add(exact.name); continue; }
+    skills.filter(s => (s.triggers || []).some(t => t.toLowerCase() === v)).forEach(s => resolved.add(s.name));
+  }
+  workspaceScope = [...resolved];
+}
+
 // ── Normalizer for trigger matching ──────────────────────────────
 
 function normalize(str) {
@@ -281,7 +306,7 @@ indexSkills();
 
 function matchSkills(query) {
   const q = normalize(query);
-  return skills.filter(s => {
+  return getScopedSkills().filter(s => {
     if (normalize(s.name).includes(q)) return true;
     if (normalize(s.description || '').includes(q)) return true;
     if (s.triggers.some(t => {
@@ -463,12 +488,14 @@ OPTIONS:
       process.exit(0);
 
     case 'list':
-      if (skills.length === 0) {
-        console.log('No skills found in', SKILLS_DIR);
+      const scopedList = getScopedSkills();
+      if (scopedList.length === 0) {
+        console.log('\n  No skills found.\n');
         process.exit(0);
       }
-      console.log(`\n  ${skills.length} skills in ${SKILLS_DIR}\n`);
-      for (const s of skills) {
+      const listNote = workspaceScope ? ` (scoped: ${workspaceScope.length} of ${skills.length})` : '';
+      console.log(`\n  ${scopedList.length} skills in ${SKILLS_DIR}${listNote}\n`);
+      for (const s of scopedList) {
         const desc = (s.description || '').split('\n')[0].slice(0, 70);
         const active = activeSkills.has(s.name) ? ' [ACTIVE]' : '';
         console.log(`  ${(s.name + active).padEnd(28)} ${desc}`);
@@ -659,6 +686,21 @@ rl.on('line', (line) => {
               description: 'List all currently loaded skills with their domain, relevance score against the current task context, and lifecycle status (relevant / low / stale). Use this to decide which skills to keep or unload.',
               inputSchema: { type: 'object', properties: {} },
             },
+            {
+              name: 'set_workspace',
+              description: 'Restrict the skill index to only skills relevant to your current workspace. After calling this, match_skills and list_skills only see skills in scope. Call with an empty array to reset and see all skills again. This keeps the skill index lean — only the skills you need are discoverable.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  scope: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'List of skill names or trigger keywords to include in scope (e.g., ["gsap", "animation", "frontend-design"]). Empty array to reset to all skills.',
+                  },
+                },
+                required: ['scope'],
+              },
+            },
           ],
         });
         break;
@@ -671,14 +713,14 @@ rl.on('line', (line) => {
             const query = rawQuery.toLowerCase();
             if (!query) {
               respond(id, {
-                content: [{ type: 'text', text: `No query. All ${skills.length} skills available — use \`list_skills\` to browse.` }],
+                content: [{ type: 'text', text: `No query. ${getScopedSkills().length} skill(s) in scope — use \`list_skills\` to browse.` }],
               });
               break;
             }
             const matched = matchSkills(query);
             if (matched.length === 0) {
               respond(id, {
-                content: [{ type: 'text', text: `No skills matched "${rawQuery}".\n\nAvailable: ${skills.map(s => s.name).join(', ')}` }],
+                content: [{ type: 'text', text: `No skills matched "${rawQuery}".\n\nAvailable: ${getScopedSkills().map(s => s.name).join(', ')}` }],
               });
               break;
             }
@@ -730,16 +772,18 @@ rl.on('line', (line) => {
           }
 
           case 'list_skills': {
-            const text = skills.map(s => {
+            const scoped = getScopedSkills();
+            const text = scoped.map(s => {
               const active = activeSkills.has(s.name) ? ' **[ACTIVE]**' : '';
               const desc = (s.description || 'No description').split('\n')[0];
               return `- **${s.name}${active}**: ${desc}`;
             }).join('\n');
             const activeCount = activeSkills.size;
+            const scopeNote = workspaceScope ? ` (scoped: ${scoped.length} of ${skills.length})` : '';
             respond(id, {
               content: [{
                 type: 'text',
-                text: `**${skills.length} skills installed** (${activeCount} active)\n\n${text}\n\n_Call \`get_active_skills\` for lifecycle status._`,
+                text: `**${scoped.length} skills${scopeNote}** (${activeCount} active)\n\n${text}\n\n_Call \`get_active_skills\` for lifecycle status._`,
               }],
             });
             break;
@@ -824,6 +868,19 @@ rl.on('line', (line) => {
             }
 
             respond(id, { content: [{ type: 'text', text: output }] });
+            break;
+          }
+
+          case 'set_workspace': {
+            const scope = args?.scope || [];
+            if (!Array.isArray(scope) || scope.length === 0) {
+              workspaceScope = null;
+              respond(id, { content: [{ type: 'text', text: `Workspace reset. All ${skills.length} skills are now discoverable.\n\nUse \`set_workspace\` with specific skill names or triggers to scope down.` }] });
+            } else {
+              setWorkspaceScope(scope);
+              const scoped = getScopedSkills();
+              respond(id, { content: [{ type: 'text', text: `Workspace scoped to ${scoped.length} skill(s).\n\nOnly these skills are now visible to \`match_skills\` and \`list_skills\`.\nUse \`set_workspace\` with an empty scope to reset.` }] });
+            }
             break;
           }
 
