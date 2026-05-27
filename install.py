@@ -95,8 +95,28 @@ def detect_client():
         "cursor": [
             os.path.join(os.path.expanduser("~"), ".cursor", "mcp.json"),
         ],
+        "windsurf": [
+            os.path.join(os.path.expanduser("~"), ".codeium", "windsurf", "mcp.json"),
+            os.path.join(os.path.expanduser("~"), ".windsurf", "mcp.json"),
+        ],
         "continue": [
             os.path.join(os.path.expanduser("~"), ".continue", "config.json"),
+        ],
+        "vscode": [
+            os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "Code", "User", "mcp.json"),
+            os.path.join(os.path.expanduser("~"), "Library", "Application Support", "Code", "User", "mcp.json"),
+            os.path.join(os.path.expanduser("~"), ".config", "Code", "User", "mcp.json"),
+        ],
+        "vscodium": [
+            os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "VSCodium", "User", "mcp.json"),
+            os.path.join(os.path.expanduser("~"), ".config", "VSCodium", "User", "mcp.json"),
+        ],
+        "antigravity1": [
+            os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "Antigravity", "User", "mcp.json"),
+            os.path.join(os.path.expanduser("~"), ".config", "Antigravity", "User", "mcp.json"),
+        ],
+        "antigravity2": [
+            os.path.join(os.path.expanduser("~"), ".gemini", "antigravity", "mcp_config.json"),
         ],
     }
     for client, config_paths in paths.items():
@@ -106,31 +126,18 @@ def detect_client():
                 break
     return clients
 
-def configure_opencode(config_path, target_dir):
-    step("Configuring opencode ...")
-    config = {}
-    if os.path.isfile(config_path):
-        with open(config_path, "r", encoding="utf-8") as f:
-            try:
-                config = json.load(f)
-            except json.JSONDecodeError:
-                config = {}
-    if "mcp" not in config:
-        config["mcp"] = {}
-    config["mcp"]["skill-dispatcher"] = {
-        "type": "local",
-        "command": [
-            "node",
-            os.path.join(target_dir, "index.mjs").replace("\\", "/"),
-            "--skills-dir",
-            os.path.join(target_dir, "skills").replace("\\", "/"),
-        ],
-        "enabled": True,
-    }
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
-    ok(f"MCP server added to {config_path}")
+def add_mcp_entry(config, key, entry):
+    if key not in config:
+        config[key] = {}
+    config[key]["skill-dispatcher"] = entry
 
+def add_instructions_file(config, config_path, target_dir):
+    """Add instructions.md and ALWAYS_ON.md to opencode's instructions array."""
+    instr_key = "instructions"
+    if instr_key not in config:
+        config[instr_key] = []
+    
+    # Create instructions.md next to config
     instructions_dir = os.path.dirname(config_path)
     instructions_path = os.path.join(instructions_dir, "instructions.md")
     instructions_content = (
@@ -145,9 +152,19 @@ def configure_opencode(config_path, target_dir):
         ok(f"Created instructions.md at {instructions_path}")
     else:
         ok(f"instructions.md already exists at {instructions_path}")
+    
+    # Add instructions.md to array if not already there
+    if instructions_path not in config[instr_key]:
+        config[instr_key].append(instructions_path)
+    
+    # Add ALWAYS_ON.md to array if not already there
+    always_on_path = os.path.join(target_dir, "ALWAYS_ON.md")
+    if always_on_path not in config[instr_key]:
+        config[instr_key].append(always_on_path)
+        ok(f"Added ALWAYS_ON.md as permanent system instruction")
 
-def configure_claude(config_path, target_dir):
-    step("Configuring Claude Desktop ...")
+def configure_opencode(config_path, target_dir):
+    step("Configuring opencode ...")
     config = {}
     if os.path.isfile(config_path):
         with open(config_path, "r", encoding="utf-8") as f:
@@ -155,22 +172,28 @@ def configure_claude(config_path, target_dir):
                 config = json.load(f)
             except json.JSONDecodeError:
                 config = {}
-    if "mcpServers" not in config:
-        config["mcpServers"] = {}
-    config["mcpServers"]["skill-dispatcher"] = {
-        "command": "node",
-        "args": [
+    
+    add_mcp_entry(config, "mcp", {
+        "type": "local",
+        "command": [
+            "node",
             os.path.join(target_dir, "index.mjs").replace("\\", "/"),
             "--skills-dir",
             os.path.join(target_dir, "skills").replace("\\", "/"),
         ],
-    }
+        "enabled": True,
+    })
+    
+    # Add ALWAYS_ON.md + instructions.md as permanent system instructions
+    add_instructions_file(config, config_path, target_dir)
+    
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
-    ok(f"MCP server added to {config_path}")
+    ok(f"OpenCode configured at {config_path}")
 
-def configure_cursor(config_path, target_dir):
-    step("Configuring Cursor ...")
+def configure_mcp_servers(config_path, target_dir, label, key="mcpServers"):
+    """Generic config for tools using mcpServers format (Claude, Cursor, Windsurf, Antigravity 2.x)."""
+    step(f"Configuring {label} ...")
     config = {}
     if os.path.isfile(config_path):
         with open(config_path, "r", encoding="utf-8") as f:
@@ -178,19 +201,53 @@ def configure_cursor(config_path, target_dir):
                 config = json.load(f)
             except json.JSONDecodeError:
                 config = {}
-    if "mcpServers" not in config:
-        config["mcpServers"] = {}
-    config["mcpServers"]["skill-dispatcher"] = {
+    
+    add_mcp_entry(config, key, {
         "command": "node",
         "args": [
             os.path.join(target_dir, "index.mjs").replace("\\", "/"),
             "--skills-dir",
             os.path.join(target_dir, "skills").replace("\\", "/"),
         ],
-    }
+    })
+    
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
-    ok(f"MCP server added to {config_path}")
+    ok(f"MCP server added to {label} at {config_path}")
+
+def configure_servers(config_path, target_dir, label, key="servers"):
+    """Generic config for tools using native servers format (VSCode, VSCodium, Antigravity 1.x)."""
+    step(f"Configuring {label} ...")
+    config = {}
+    if os.path.isfile(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            try:
+                config = json.load(f)
+            except json.JSONDecodeError:
+                config = {}
+    
+    add_mcp_entry(config, key, {
+        "type": "stdio",
+        "command": "node",
+        "args": [
+            os.path.join(target_dir, "index.mjs").replace("\\", "/"),
+            "--skills-dir",
+            os.path.join(target_dir, "skills").replace("\\", "/"),
+        ],
+    })
+    
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+    ok(f"MCP server added to {label} at {config_path}")
+
+configure_claude = lambda p, t: configure_mcp_servers(p, t, "Claude Desktop", "mcpServers")
+configure_cursor = lambda p, t: configure_mcp_servers(p, t, "Cursor", "mcpServers")
+configure_windsurf = lambda p, t: configure_mcp_servers(p, t, "Windsurf", "mcpServers")
+configure_continue = lambda p, t: configure_mcp_servers(p, t, "Continue.dev", "mcpServers")
+configure_vscode = lambda p, t: configure_servers(p, t, "VS Code / VS Studio Code", "servers")
+configure_vscodium = lambda p, t: configure_servers(p, t, "VSCodium", "servers")
+configure_antigravity1 = lambda p, t: configure_servers(p, t, "Antigravity 1.x", "servers")
+configure_antigravity2 = lambda p, t: configure_mcp_servers(p, t, "Antigravity 2.x", "mcpServers")
 
 def create_sample_skills(target_dir):
     skills_dir = os.path.join(target_dir, "skills")
@@ -268,13 +325,22 @@ def main():
         step("No supported AI client config found.")
         step("You can manually add the MCP server later (see SKILL.md).")
     else:
+        # Client name → config function mapping
+        client_handlers = {
+            "opencode": configure_opencode,
+            "claude": configure_claude,
+            "cursor": configure_cursor,
+            "windsurf": configure_windsurf,
+            "continue": configure_continue,
+            "vscode": configure_vscode,
+            "vscodium": configure_vscodium,
+            "antigravity1": configure_antigravity1,
+            "antigravity2": configure_antigravity2,
+        }
         for client, config_path in clients:
-            if client == "opencode":
-                configure_opencode(config_path, target)
-            elif client == "claude":
-                configure_claude(config_path, target)
-            elif client == "cursor":
-                configure_cursor(config_path, target)
+            handler = client_handlers.get(client)
+            if handler:
+                handler(config_path, target)
 
     create_sample_skills(target)
 

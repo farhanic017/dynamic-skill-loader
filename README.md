@@ -2,11 +2,15 @@
 [![Platform](https://img.shields.io/badge/platform-Node.js%2018%2B-green)]()
 [![Author](https://img.shields.io/badge/author-Farhan%20Dhrubo-red)](https://github.com/farhanic017)
 
-# Dynamic Skill Loader for OpenCode (and any MCP-compatible AI tool)
+# Dynamic Skill Loader — Always-on skill dispatcher for any AI coding tool
 
 > Created by [Farhan Dhrubo](https://github.com/farhanic017) — [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader-for-opencode/issues)
 
-An MCP server that loads AI coding skills **on-demand** by matching **trigger keywords** against your task — just like Claude Code's built-in skill system. Works with **OpenCode**, **Claude Desktop**, **Cursor**, and any MCP-compatible client.
+An MCP server that loads AI coding skills **on-demand** by matching **trigger keywords** against your task — just like Claude Code's built-in skill system.
+
+**Always-on:** Add `ALWAYS_ON.md` to your AI client's permanent instructions so the model calls `match_skills` at the start of EVERY task automatically.
+
+Works with **OpenCode**, **Claude Desktop/Code**, **Cursor**, **Windsurf**, **Continue.dev**, **VS Code / VS Studio Code**, **VSCodium**, **Antigravity 1.x & 2.x**, **Aider**, and any MCP-compatible client.
 
 Stop loading 50+ skills at startup. Only load what you need, when you need it.
 
@@ -88,13 +92,16 @@ Full skill instructions here...
 
 ### 3. Add to your AI tool
 
-#### opencode
+#### OpenCode — always-on via `ALWAYS_ON.md`
 
 Add to `opencode.jsonc`:
 
 ```jsonc
 {
-  "instructions": ["path/to/instructions.md"],
+  "instructions": [
+    "path/to/ALWAYS_ON.md",     // <-- always-on: auto-calls match_skills at task start
+    "path/to/instructions.md"
+  ],
   "mcp": {
     "skill-dispatcher": {
       "type": "local",
@@ -105,13 +112,8 @@ Add to `opencode.jsonc`:
 }
 ```
 
-Create `instructions.md`:
-
-```markdown
-## Skills
-Skills are NOT pre-loaded. At the start of every task, call `match_skills`
-with your task description to load relevant skills on-demand.
-```
+The `ALWAYS_ON.md` file injects a permanent rule: "Call `match_skills` at the
+START of every task" — so the dispatcher is always-on, never forgotten.
 
 #### Claude Desktop
 
@@ -137,6 +139,109 @@ Name: skill-dispatcher
 Type: command
 Command: npx skill-dispatcher --skills-dir /path/to/skills
 ```
+
+#### Windsurf
+
+Add in Windsurf's MCP server settings (same format as Cursor):
+
+```
+Name: skill-dispatcher
+Type: command
+Command: npx skill-dispatcher --skills-dir /path/to/skills
+```
+
+#### Continue.dev
+
+Add to `~/.continue/config.json`:
+
+```json
+{
+  "mcpServers": {
+    "skill-dispatcher": {
+      "command": "npx",
+      "args": ["skill-dispatcher", "--skills-dir", "/path/to/skills"]
+    }
+  }
+}
+```
+
+#### VS Code / VS Studio Code (`mcp.json`)
+
+VSCode uses the `"servers"` key (not `"mcpServers"`). Add to your user or
+workspace `mcp.json`:
+
+```json
+{
+  "servers": {
+    "skill-dispatcher": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["skill-dispatcher", "--skills-dir", "/path/to/skills"]
+    }
+  }
+}
+```
+
+**Config path (user):** `%APPDATA%\Code\User\mcp.json` (Windows) or
+`~/Library/Application Support/Code/User/mcp.json` (macOS).
+
+Open via Command Palette: `MCP: Open User Configuration`.
+
+#### VSCodium (open-source VS Code fork)
+
+Same format as VSCode — uses `"servers"` key:
+
+```json
+{
+  "servers": {
+    "skill-dispatcher": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["skill-dispatcher", "--skills-dir", "/path/to/skills"]
+    }
+  }
+}
+```
+
+**Config path:** `%APPDATA%\VSCodium\User\mcp.json` (Windows) or
+`~/.config/VSCodium/User/mcp.json` (macOS/Linux).
+
+#### Antigravity 1.x (VS Code fork)
+
+Antigravity 1.x uses the native `"servers"` format like VSCode:
+
+```json
+{
+  "servers": {
+    "skill-dispatcher": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["skill-dispatcher", "--skills-dir", "/path/to/skills"]
+    }
+  }
+}
+```
+
+**Config path:** `%APPDATA%\Antigravity\User\mcp.json` (Windows).
+
+#### Antigravity 2.x (Google AI-first IDE)
+
+Antigravity 2.x uses standard `"mcpServers"` format:
+
+```json
+{
+  "mcpServers": {
+    "skill-dispatcher": {
+      "command": "npx",
+      "args": ["skill-dispatcher", "--skills-dir", "/path/to/skills"]
+    }
+  }
+}
+```
+
+**Config path:** `%USERPROFILE%\.gemini\antigravity\mcp_config.json` (Windows).
+
+Open via Agent Panel → `...` → Manage MCP Servers → View raw config.
 
 ## Local model compatibility
 

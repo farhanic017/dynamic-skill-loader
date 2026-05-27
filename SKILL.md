@@ -12,12 +12,23 @@ triggers:
   - trigger matching
   - install skill-dispatcher
   - setup skill-dispatcher
+  - always-on skills
+  - opencode skills
+  - vscode mcp
+  - antigravity mcp
+  - cursor mcp
+  - claude mcp
 ---
 
-# Dynamic Skill Loader for OpenCode
+# Dynamic Skill Loader — Always-on skill dispatcher for any AI tool
 
 An MCP server that loads AI coding skills **on-demand** by matching trigger
-keywords against your task. Works with any MCP-compatible client.
+keywords against your task. **Always-on** via `ALWAYS_ON.md` — the model
+automatically calls `match_skills` at the start of every task.
+
+Works with **OpenCode**, **Claude Desktop/Code**, **Cursor**, **Windsurf**,
+**Continue.dev**, **VS Code / VS Studio Code**, **VSCodium**,
+**Antigravity 1.x & 2.x**, and any MCP-compatible client.
 
 ## Instant Install (one command)
 
@@ -100,6 +111,47 @@ Name: skill-dispatcher
 Type: command
 Command: node /full/path/to/index.mjs --skills-dir /path/to/skills
 ```
+
+**For Windsurf**: same format as Cursor — add in MCP server settings.
+
+**For Continue.dev** (`~/.continue/config.json`):
+
+```json
+{
+  "mcpServers": {
+    "skill-dispatcher": {
+      "command": "node",
+      "args": ["/full/path/to/index.mjs", "--skills-dir", "/path/to/skills"]
+    }
+  }
+}
+```
+
+**For VS Code / VS Studio Code** (`mcp.json` — user or workspace):
+
+```json
+{
+  "servers": {
+    "skill-dispatcher": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/full/path/to/index.mjs", "--skills-dir", "/path/to/skills"]
+    }
+  }
+}
+```
+
+Config path (user): `%APPDATA%\Code\User\mcp.json` (Windows) or
+`~/Library/Application Support/Code/User/mcp.json` (macOS).
+
+**For VSCodium** — same format as VSCode, config at
+`%APPDATA%\VSCodium\User\mcp.json` (Windows).
+
+**For Antigravity 1.x** — same format as VSCode, config at
+`%APPDATA%\Antigravity\User\mcp.json` (Windows).
+
+**For Antigravity 2.x** — uses `mcpServers` key, config at
+`%USERPROFILE%\.gemini\antigravity\mcp_config.json` (Windows).
 
 ### 3. Point it at your skills
 
