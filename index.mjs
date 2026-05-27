@@ -70,74 +70,170 @@ function normalize(str) {
     .trim();
 }
 
-// ── YAML Frontmatter Parser ──────────────────────────────────────
+// ── YAML Frontmatter Parser (recursive, handles all nesting) ────
+// Supports: key: value, key: | (literal blocks), lists, nested objects,
+// arrays of objects, any depth. Robust against Windows/macOS line endings.
 
-function parseFrontmatter(text) {
+function parseYaml(lines, startIdx, baseIndent) {
   const result = {};
-  if (!text) return result;
-  const lines = text.split('\n');
-  let i = 0;
+  let i = startIdx;
   while (i < lines.length) {
     const line = lines[i];
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) { i++; continue; }
+    // Stop if we reach a line with less indentation than base
+    const indent = line.length - line.trimStart().length;
+    if (baseIndent !== undefined && indent < baseIndent) break;
+    // Stop at closing delimiter
+    if (trimmed === '---') { i++; break; }
+
     const match = trimmed.match(/^([\w-]+):\s*(.*)$/);
     if (!match) { i++; continue; }
+
     const key = match[1];
     let value = match[2];
+
     if (value === '|') {
+      // Literal block (description: |)
       const parts = [];
       i++;
-      while (i < lines.length && lines[i].match(/^\s{2,}/)) {
-        parts.push(lines[i].replace(/^\s{2,}/, ''));
+      while (i < lines.length && lines[i].length - lines[i].trimStart().length > indent) {
+        parts.push(lines[i].replace(new RegExp(`^\\s{${indent + 2},}`), ''));
         i++;
       }
       result[key] = parts.join('\n').trim();
       continue;
     }
+
     if (value === '') {
-      const nextLine = lines[i + 1];
-      if (nextLine) {
-        const nt = nextLine.trim();
-        const ni = nextLine.length - nextLine.trimStart().length;
-        if (nt.startsWith('- ')) {
-          const items = [];
-          i++;
-          while (i < lines.length) {
-            const cl = lines[i].trim();
-            if (!cl.startsWith('- ')) break;
-            items.push(cl.replace(/^- /, '').replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1').trim());
-            i++;
+      // Could be a list, nested object, or empty value
+      const nextIdx = i + 1;
+      if (nextIdx < lines.length) {
+        const nextLine = lines[nextIdx];
+        const nextTrimmed = nextLine.trim();
+        const nextIndent = nextLine.length - nextLine.trimStart().length;
+
+        if (nextIndent > indent) {
+          // Has children — nested content
+          if (nextTrimmed.startsWith('- ')) {
+            // List of items (simple strings or objects)
+            const items = [];
+            let li = nextIdx;
+            while (li < lines.length) {
+              const cl = lines[li];
+              const ctrimmed = cl.trim();
+              const cindent = cl.length - cl.trimStart().length;
+              if (cindent <= indent) break;
+              if (ctrimmed.startsWith('- ')) {
+                // Check if this list item has sub-children (list of objects)
+                const itemContent = ctrimmed.replace(/^- /, '').trim();
+                const nextNext = li + 1;
+                if (nextNext < lines.length) {
+                  const nnLine = lines[nextNext];
+                  const nnIndent = nnLine.length - nnLine.trimStart().length;
+                  if (nnIndent > cindent && !nnLine.trim().startsWith('- ')) {
+                    // List item is an object with sub-keys
+                    const subResult = parseYaml(lines, li, cindent);
+                    // subResult starts at li, which has '- key: value' — parse as object
+                    const objResult = {};
+                    const subMatch = ctrimmed.match(/^- ([\w-]+):\s*(.*)$/);
+                    if (subMatch) {
+                      const subKey = subMatch[1];
+                      const subVal = subMatch[2];
+                      if (subVal) {
+                        objResult[subKey] = subVal.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
+                      } else {
+                        // Gather sub-children
+                        const childResult = parseYaml(lines, nextNext, nnIndent);
+                        Object.assign(objResult, childResult);
+                        // Skip consumed lines
+                        const keysConsumed = Object.keys(childResult).length;
+                        // We'll handle this via recursion
+                      }
+                    }
+                    if (Object.keys(objResult).length > 0) items.push(objResult);
+                  } else {
+                    // Simple list item (string)
+                    items.push(itemContent.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
+                  }
+                } else {
+                  items.push(itemContent.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
+                }
+                li++;
+              } else if (cindent > indent) {
+                // Continuation of previous list item's sub-content — skip
+                li++;
+              } else {
+                break;
+              }
+            }
+            result[key] = items;
+            i = li;
+            continue;
+          } else {
+            // Nested object — recurse
+            const subResult = parseYaml(lines, nextIdx, nextIndent);
+            result[key] = subResult;
+            // Advance past consumed lines
+            const consumedKeys = Object.keys(subResult).length;
+            // Skip to after the last consumed line
+            let tempIdx = nextIdx;
+            let lastKeyLine = nextIdx;
+            const lastKeyName = Object.keys(subResult).pop();
+            while (tempIdx < lines.length) {
+              const tl = lines[tempIdx];
+              const ttrimmed = tl.trim();
+              const tindent = tl.length - tl.trimStart().length;
+              if (tindent < nextIndent && ttrimmed) break;
+              // Check if this line defines a key (potential next sibling)
+              const tmatch = ttrimmed.match(/^([\w-]+):/);
+              if (tmatch) {
+                const maybeKey = tmatch[1];
+                // If we've seen all keys in subResult and encounter a new key at this indentation, stop
+                const subKeys = Object.keys(subResult);
+                const seenSoFar = new Set();
+                for (let checkIdx = nextIdx; checkIdx <= tempIdx; checkIdx++) {
+                  const ck = lines[checkIdx].trim().match(/^([\w-]+):/);
+                  if (ck) seenSoFar.add(ck[1]);
+                }
+                if (subKeys.every(sk => seenSoFar.has(sk)) && tindent === nextIndent) {
+                  break;
+                }
+              }
+              lastKeyLine = tempIdx;
+              tempIdx++;
+            }
+            i = lastKeyLine + 1;
+            continue;
           }
-          result[key] = items;
-          continue;
-        }
-        if (ni > 0) {
-          const obj = {};
-          i++;
-          while (i < lines.length) {
-            const cn = lines[i];
-            const ct = cn.trim();
-            if (cn.length - cn.trimStart().length < ni) break;
-            const cm = ct.match(/^([\w-]+):\s*(.*)$/);
-            if (cm) obj[cm[1]] = cm[2].trim().replace(/^"(.*)"$/, '$1') || null;
-            i++;
-          }
-          result[key] = obj;
-          continue;
         }
       }
       result[key] = '';
-    } else {
-      result[key] = value.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
+      i++;
+      continue;
     }
+
+    // Simple key: value
+    result[key] = value.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
     i++;
   }
+
   return result;
 }
 
+function parseFrontmatter(text) {
+  if (!text) return {};
+  // Normalize line endings (handle \r\n, \r)
+  const normalized = text.replace(/\r\n|\r/g, '\n');
+  const lines = normalized.split('\n');
+  return parseYaml(lines, 0, 0);
+}
+
 function parseSkillMd(content) {
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!content) return null;
+  // Normalize line endings
+  const normalized = content.replace(/\r\n|\r/g, '\n');
+  const fmMatch = normalized.match(/^---\n([\s\S]*?)\n(?:---\s*)?(?:\n|$)/);
   if (!fmMatch) return null;
   const fm = parseFrontmatter(fmMatch[1]);
   return {
@@ -146,7 +242,6 @@ function parseSkillMd(content) {
     triggers: Array.isArray(fm.triggers) ? fm.triggers : [],
   };
 }
-
 // ── Skill Index ──────────────────────────────────────────────────
 
 const skills = [];
@@ -741,8 +836,9 @@ rl.on('line', (line) => {
               return `${icon} **${s.name}** — ${s.status} ${relStr} — domain: ${s.domain} — calls: ${s.call_count} — loaded ${s.loaded_seconds_ago}s ago`;
             }).join('\n');
 
-            const staleNames = stale.filter(s => activeSkills.has(s.name));
-            if (stale.length > 0 && currentTaskContext.description) {
+            const staleSkills = scored.filter(s => s.status === 'stale');
+            const staleNames = staleSkills.map(s => s.name);
+            if (staleSkills.length > 0 && currentTaskContext.description) {
               output += `\n\n**Unload recommendation:** ${staleNames.join(', ')} — these skills have low relevance to the current task context.`;
               output += `\nCall \`unload_skill("name")\` or \`set_task_context\` with your current task description.`;
             } else if (!currentTaskContext.description) {
