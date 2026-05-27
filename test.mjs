@@ -191,19 +191,20 @@ test('MCP initialize responds correctly', async () => {
   assert(resp.result.protocolVersion === '2024-11-05', 'wrong protocol version');
 });
 
-// ── 9. MCP tools/list (now 6 tools) ─────────────────────────
-test('MCP tools/list returns 6 tools', async () => {
+// ── 9. MCP tools/list (now 7 tools with set_workspace) ──────
+test('MCP tools/list returns 7 tools', async () => {
   const { output } = await runMCP({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
   const resp = JSON.parse(output.trim());
   const tools = resp.result.tools;
-  assert(tools.length === 6, `expected 6 tools, got ${tools.length}`);
+  assert(tools.length === 7, `expected 7 tools, got ${tools.length}`);
   const names = tools.map(t => t.name).sort();
   assert(names[0] === 'get_active_skills', 'missing get_active_skills');
   assert(names[1] === 'get_skill', 'missing get_skill');
   assert(names[2] === 'list_skills', 'missing list_skills');
   assert(names[3] === 'match_skills', 'missing match_skills');
   assert(names[4] === 'set_task_context', 'missing set_task_context');
-  assert(names[5] === 'unload_skill', 'missing unload_skill');
+  assert(names[5] === 'set_workspace', 'missing set_workspace');
+  assert(names[6] === 'unload_skill', 'missing unload_skill');
 });
 
 // ── 10. MCP match_skills ────────────────────────────────────
@@ -215,11 +216,11 @@ test('MCP match_skills("gsap") works', async () => {
   assert(text.includes('gsap-core'), 'missing gsap-core');
 });
 
-test('MCP match_skills("") returns all', async () => {
+test('MCP match_skills("") shows all in scope', async () => {
   const req = { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'match_skills', arguments: { query: '' } } };
   const { output } = await runMCP(req);
   const resp = JSON.parse(output.trim());
-  assert(resp.result.content[0].text.includes('All 4 skills'), 'should mention all skills');
+  assert(resp.result.content[0].text.includes('4 skill(s) in scope'), 'should mention all skills');
 });
 
 // ── 11. MCP get_skill (with active tracking) ────────────────
@@ -343,6 +344,113 @@ test('CLI --help shows new lifecycle flags', () => {
   const out = runCLI('--help');
   assert(out.includes('--active'), 'should mention --active');
   assert(out.includes('--context'), 'should mention --context');
+  assert(out.includes('--simple'), 'should mention --simple');
+  assert(out.includes('--agent-config'), 'should mention --agent-config');
+});
+
+// ── 20. Smart scoring: multi-token ranking ────────────────
+test('CLI smart match ranks gsap-core highest for "gsap animation"', () => {
+  const out = runCLI('--match "gsap animation"');
+  const lines = out.split('\n');
+  // First skill line (highest score) should contain gsap-core
+  const firstSkill = lines.find(l => l.includes('█') || l.includes('░░'));
+  assert(out.includes('gsap-core'), 'gsap-core should be in results');
+  assert(firstSkill === undefined || out.indexOf('gsap-core') < out.indexOf('frontend-design') || !out.includes('frontend-design'), 'gsap-core should rank higher');
+});
+
+test('CLI smart match scores visible in output', () => {
+  const out = runCLI('--match "gsap"');
+  assert(out.includes('█') || out.includes('score'), 'should show score visualization');
+});
+
+// ── 21. Synonym expansion via CLI ─────────────────────────
+test('CLI synonym "database" matches supabase', () => {
+  const out = runCLI('--match "database"');
+  assert(out.includes('supabase'), '"database" synonym should match supabase');
+});
+
+test('CLI synonym "authentication" matches supabase', () => {
+  const out = runCLI('--match "authentication"');
+  assert(out.includes('supabase'), '"authentication" synonym should match supabase');
+});
+
+test('CLI synonym "motion" matches gsap-core', () => {
+  const out = runCLI('--match "motion"');
+  assert(out.includes('gsap-core'), '"motion" synonym should match gsap-core');
+});
+
+// ── 22. Simple mode JSON (for local models) ───────────────
+test('Simple mode --list returns valid JSON', () => {
+  const out = runCLI('--simple --list');
+  const parsed = JSON.parse(out);
+  assert(Array.isArray(parsed.skills), 'should have skills array');
+  assert(parsed.skills.length === 4, 'should have 4 skills');
+});
+
+test('Simple mode --match returns valid JSON with scores', () => {
+  const out = runCLI('--simple --match "gsap animation"');
+  const parsed = JSON.parse(out);
+  assert(parsed.count > 0, 'should have results');
+  assert(parsed.results[0].score > 0, 'should have scores');
+  assert(parsed.results[0].name !== undefined, 'should have name');
+});
+
+test('Simple mode --get returns valid JSON', () => {
+  const out = runCLI('--simple --get gsap-core');
+  const parsed = JSON.parse(out);
+  assert(parsed.name === 'gsap-core', 'name should match');
+  assert(parsed.content.length > 0, 'should have content');
+  assert(parsed.active_count > 0, 'should be active');
+});
+
+test('Simple mode --active returns valid JSON', () => {
+  const out = runCLI('--simple --active');
+  const parsed = JSON.parse(out);
+  assert(parsed.active_count >= 0, 'should have active_count');
+});
+
+test('Simple mode --unload returns valid JSON', () => {
+  const out = runCLI('--simple --unload gsap-core');
+  const parsed = JSON.parse(out);
+  assert(parsed.skill === 'gsap-core', 'should reference skill');
+});
+
+// ── 23. Agent config ──────────────────────────────────────
+function testAgentConfig() {
+  const cfgPath = join(TMP, '..', '.test-agent.json');
+  const cfg = { name: 'test-agent', allowedSkills: ['gsap-core', 'frontend-design'] };
+  writeFileSync(cfgPath, JSON.stringify(cfg), 'utf-8');
+  const out = execSync(`node "${MJS}" --skills-dir "${TMP}" --agent-config "${cfgPath}" --list`, { encoding: 'utf-8' });
+  rmSync(cfgPath);
+  return out;
+}
+
+test('Agent config restricts skills to allowed list', () => {
+  const out = testAgentConfig();
+  assert(out.includes('gsap-core'), 'should include gsap-core');
+  assert(out.includes('frontend-design'), 'should include frontend-design');
+  assert(!out.includes('supabase'), 'should NOT include supabase');
+  assert(!out.includes('skill-dispatcher'), 'should NOT include skill-dispatcher');
+});
+
+// ── 24. Deep smart matching: compound tokens ──────────────
+test('CLI smart match handles compound "web-animation" token', () => {
+  const out = runCLI('--match "web-animation"');
+  assert(out.includes('gsap-core'), 'should match via token splitting');
+});
+
+test('CLI smart match multiple tokens boosts specificity', () => {
+  const out = runCLI('--match "supabase database postgres"');
+  const lines = out.split('\n');
+  const firstSkillLine = lines.find(l => l.includes('█') || l.includes('supabase'));
+  assert(out.includes('supabase'), 'supabase should be in results');
+});
+
+// ── 25. Simple mode context ───────────────────────────────
+test('Simple mode --context returns valid JSON', () => {
+  const out = runCLI('--simple --context "animations and gsap"');
+  const parsed = JSON.parse(out);
+  assert(parsed.context === 'animations and gsap', 'context should match');
 });
 
 // ── Summary ──

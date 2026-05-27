@@ -1,0 +1,6 @@
+{
+  "name": "frontend-agent",
+  "description": "Subagent that only builds UI components. Use with --agent-config flag.",
+  "allowedSkills": ["gsap-core", "gsap-scrolltrigger", "frontend-design", "ui-skills", "web-design-guidelines"],
+  "excludeSkills": ["browser", "supabase", "company-research", "event-prospecting"]
+}

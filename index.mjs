@@ -25,6 +25,8 @@ const args = process.argv.slice(2);
 let SKILLS_DIR = './skills';
 let cliMode = null;
 let cliArg = '';
+let simpleMode = false; // --simple: plain JSON output for local models
+let agentConfigPath = null; // --agent-config: restrict skills per agent
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--skills-dir' || args[i] === '-s') {
@@ -49,6 +51,11 @@ for (let i = 0; i < args.length; i++) {
   } else if (args[i] === '--context' || args[i] === '-c') {
     cliMode = 'context';
     cliArg = args[i + 1] || '';
+    i++;
+  } else if (args[i] === '--simple') {
+    simpleMode = true;
+  } else if (args[i] === '--agent-config') {
+    agentConfigPath = args[i + 1] || null;
     i++;
   } else if (args[i] === '--help' || args[i] === '-h') {
     cliMode = 'help';
@@ -93,6 +100,94 @@ function normalize(str) {
     .replace(/[-_\/\\.,;:!?@#$%^&*()\[\]{}|`~'"+=<>]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// ── Synonym map for smart cross-domain discovery ─────────────────
+// Maps common task terms to skill trigger keywords.
+// When a user says "database", it expands to also match
+// skills tagged with "postgres", "supabase", "sql", "storage", etc.
+// This enables zero-config discovery across different vocabularies.
+
+const SYNONYM_MAP = {
+  'database': ['db', 'sql', 'postgres', 'supabase', 'storage', 'query', 'data', 'table', 'migration'],
+  'auth': ['authentication', 'login', 'signin', 'signup', 'oauth', 'jwt', 'session', 'user', 'password'],
+  'frontend': ['ui', 'ux', 'web', 'interface', 'react', 'component', 'layout', 'responsive', 'css', 'html'],
+  'backend': ['server', 'api', 'endpoint', 'function', 'edge', 'cloud', 'runtime'],
+  'animation': ['motion', 'gsap', 'animate', 'transition', 'scroll', 'timeline', 'tween', 'easing', 'spring'],
+  'design': ['ui', 'ux', 'visual', 'brand', 'style', 'theme', 'color', 'typography', 'layout', 'css'],
+  'browser': ['web', 'chrome', 'playwright', 'puppeteer', 'cdp', 'automation', 'navigation', 'page'],
+  'test': ['testing', 'qa', 'spec', 'assert', 'verify', 'check', 'lint', 'audit'],
+  'deploy': ['publish', 'release', 'ship', 'production', 'ci', 'cd', 'function', 'edge'],
+  'security': ['secure', 'auth', 'permission', 'rbac', 'policy', 'encrypt', 'token', 'jwt'],
+  'mobile': ['ios', 'android', 'react-native', 'swift', 'kotlin', 'app'],
+  'data': ['chart', 'graph', 'visualization', 'd3', 'dashboard', 'analytics', 'metric'],
+  'image': ['photo', 'picture', 'screenshot', 'canvas', 'svg', 'png', 'jpeg', 'render', 'visual'],
+  'video': ['mp4', 'webm', 'mov', 'remotion', 'frame', 'animation', 'scene', 'timeline'],
+  'search': ['find', 'query', 'index', 'retrieve', 'discover', 'lookup'],
+  'network': ['fetch', 'api', 'http', 'request', 'ajax', 'websocket', 'rest', 'endpoint'],
+  'state': ['store', 'reactive', 'signal', 'context', 'redux', 'recoil', 'zustand'],
+  'prompt': ['llm', 'ai', 'instruction', 'template', 'generation', 'text'],
+  'document': ['docx', 'word', 'pdf', 'file', 'report', 'letter'],
+  'automation': ['script', 'workflow', 'pipeline', 'task', 'schedule', 'cron', 'bot'],
+  'sales': ['crm', 'lead', 'prospect', 'outreach', 'customer', 'revenue', 'pipeline'],
+  'marketing': ['campaign', 'seo', 'analytics', 'content', 'brand', 'social'],
+  'icon': ['svg', 'vector', 'symbol', 'glyph', 'logo'],
+  'typography': ['font', 'type', 'text', 'readability', 'typeface'],
+};
+
+// ── Tokenizer for smart matching ─────────────────────────────────
+// Splits a query into meaningful tokens, preserving compound terms
+// (e.g., "skill-dispatcher" stays as a token alongside "skill", "dispatcher").
+
+function tokenize(str) {
+  const tokens = [];
+  const normalized = normalize(str);
+  const words = normalized.split(/\s+/).filter(t => t.length > 0);
+  for (const w of words) {
+    tokens.push(w);
+    // Also add compound splits for hyphenated/joined words
+    if (w.includes('-') || w.includes('_') || w.includes('/')) {
+      const parts = w.split(/[-_\/]/).filter(p => p.length > 1);
+      for (const p of parts) {
+        if (!tokens.includes(p)) tokens.push(p);
+      }
+    }
+  }
+  return [...new Set(tokens)];
+}
+
+function buildReverseSynonymMap() {
+  const rev = {};
+  for (const [key, vals] of Object.entries(SYNONYM_MAP)) {
+    for (const v of vals) {
+      if (!rev[v]) rev[v] = [];
+      if (!rev[v].includes(key)) rev[v].push(key);
+    }
+  }
+  return rev;
+}
+
+const REVERSE_SYNONYM_MAP = buildReverseSynonymMap();
+
+function expandSynonyms(tokens) {
+  const expanded = [];
+  for (const t of tokens) {
+    expanded.push(t);
+    // Forward: key → values
+    const fwd = SYNONYM_MAP[t];
+    if (fwd) for (const s of fwd) { if (!expanded.includes(s)) expanded.push(s); }
+    // Reverse: value → keys (e.g., "motion" → "animation")
+    const rev = REVERSE_SYNONYM_MAP[t];
+    if (rev) for (const s of rev) { if (!expanded.includes(s)) expanded.push(s); }
+    // Also bring values of reverse-matched keys
+    if (rev) {
+      for (const rk of rev) {
+        const fwd2 = SYNONYM_MAP[rk];
+        if (fwd2) for (const s of fwd2) { if (!expanded.includes(s)) expanded.push(s); }
+      }
+    }
+  }
+  return [...new Set(expanded)];
 }
 
 // ── YAML Frontmatter Parser (recursive, handles all nesting) ────
@@ -256,8 +351,8 @@ function parseFrontmatter(text) {
 
 function parseSkillMd(content) {
   if (!content) return null;
-  // Normalize line endings
-  const normalized = content.replace(/\r\n|\r/g, '\n');
+  // Normalize line endings and strip UTF-8 BOM (common on Windows files)
+  const normalized = content.replace(/\r\n|\r/g, '\n').replace(/^\uFEFF/, '');
   const fmMatch = normalized.match(/^---\n([\s\S]*?)\n(?:---\s*)?(?:\n|$)/);
   if (!fmMatch) return null;
   const fm = parseFrontmatter(fmMatch[1]);
@@ -302,19 +397,161 @@ function indexSkills() {
 
 indexSkills();
 
-// ── Matching Logic ───────────────────────────────────────────────
+// ── Agent Config (optional) ─────────────────────────────────────
+// Restricts skills based on an agent's JSON profile.
+// Subagents only see skills they're allowed to use.
+
+if (agentConfigPath) {
+  try {
+    const cfg = JSON.parse(readFileSync(agentConfigPath, 'utf-8'));
+    // Build scope step by step: start with all, then filter
+    let agentScopeSet = new Set(skills.map(s => s.name));
+
+    if (cfg.allowedSkills && Array.isArray(cfg.allowedSkills) && cfg.allowedSkills.length > 0) {
+      agentScopeSet = new Set(skills.filter(s => cfg.allowedSkills.includes(s.name)).map(s => s.name));
+      console.error(`[skill-dispatcher] Agent "${cfg.name || 'unnamed'}" → allowed ${agentScopeSet.size} skills`);
+    }
+    if (cfg.allowedTriggers && Array.isArray(cfg.allowedTriggers) && cfg.allowedTriggers.length > 0) {
+      const triggerFiltered = skills.filter(s => (s.triggers || []).some(t => cfg.allowedTriggers.includes(t)));
+      agentScopeSet = new Set([...agentScopeSet].filter(n => triggerFiltered.some(s => s.name === n)));
+      console.error(`[skill-dispatcher] Trigger filter → ${agentScopeSet.size} skills remaining`);
+    }
+    if (cfg.excludeSkills && Array.isArray(cfg.excludeSkills) && cfg.excludeSkills.length > 0) {
+      agentScopeSet = new Set([...agentScopeSet].filter(n => !cfg.excludeSkills.includes(n)));
+      console.error(`[skill-dispatcher] Excluded ${cfg.excludeSkills.length} skill(s) → ${agentScopeSet.size} remaining`);
+    }
+
+    workspaceScope = [...agentScopeSet];
+  } catch (err) {
+    console.error(`[skill-dispatcher] Agent config error: ${err.message}. Proceeding with all skills.`);
+  }
+}
+
+// ── Smart Matching Engine ───────────────────────────────────────
+// Token-aware scoring with synonym expansion and weighted fields.
+// Returns ranked results — best match first. The score reflects
+// how many query tokens matched and their match quality.
+// Zero-config: works with ANY current or future skill.
+
+function matchToken(token, text) {
+  if (!text) return 0;
+  const words = text.split(/\s+/);
+  // Exact word match (highest confidence)
+  for (const w of words) {
+    if (w === token) return 1.0;
+  }
+  // Substring within a word
+  if (token.length >= 2) {
+    for (const w of words) {
+      if (w.includes(token)) return 0.8;
+      if (w.startsWith(token) || token.startsWith(w)) return 0.7;
+    }
+  }
+  return 0;
+}
+
+function computeSmartScore(skill, tokens, expandedTokens) {
+  if (tokens.length === 0) return 0;
+
+  const nameNorm = normalize(skill.name);
+  const descNorm = normalize(skill.description || '');
+  const triggerNorms = (skill.triggers || []).map(t => normalize(t));
+
+  let totalScore = 0;
+  let matchedTokens = new Set();
+
+  for (const token of tokens) {
+    let tokenScore = 0;
+
+    // Name: highest weight (3x)
+    const nameHit = matchToken(token, nameNorm);
+    if (nameHit > 0) tokenScore = Math.max(tokenScore, nameHit * 3);
+
+    // Triggers: medium weight (2x)
+    for (const tn of triggerNorms) {
+      const trigHit = matchToken(token, tn);
+      if (trigHit > 0) tokenScore = Math.max(tokenScore, trigHit * 2);
+    }
+
+    // Description: base weight (1x)
+    const descHit = matchToken(token, descNorm);
+    if (descHit > 0) tokenScore = Math.max(tokenScore, descHit * 1);
+
+    // Synonym expansion: check if any expanded term matches triggers
+    if (tokenScore === 0) {
+      for (const exp of expandedTokens) {
+        if (exp === token) continue;
+        for (const tn of triggerNorms) {
+          const synHit = matchToken(exp, tn);
+          if (synHit > 0) { tokenScore = Math.max(tokenScore, synHit * 1.5); break; }
+        }
+        if (tokenScore > 0) break;
+        const synNameHit = matchToken(exp, nameNorm);
+        if (synNameHit > 0) { tokenScore = Math.max(tokenScore, synNameHit * 1.2); break; }
+      }
+    }
+
+    if (tokenScore > 0) {
+      matchedTokens.add(token);
+      totalScore += tokenScore;
+    }
+  }
+
+  // Boost if most tokens matched (query was specific)
+  const matchRatio = matchedTokens.size / tokens.length;
+  if (matchRatio >= 0.8 && tokens.length > 1) totalScore *= 1.3;
+  if (matchRatio >= 1.0 && tokens.length > 1) totalScore *= 1.15;
+
+  // Normalize to a 0-100 scale for readability
+  return Math.round(totalScore * 100) / 100;
+}
 
 function matchSkills(query) {
-  const q = normalize(query);
-  return getScopedSkills().filter(s => {
-    if (normalize(s.name).includes(q)) return true;
-    if (normalize(s.description || '').includes(q)) return true;
-    if (s.triggers.some(t => {
-      const tn = normalize(t);
-      return tn.includes(q) || q.includes(tn);
-    })) return true;
-    return false;
-  });
+  if (!query || !query.trim()) return [...getScopedSkills()];
+  const tokens = tokenize(query);
+  const expandedTokens = expandSynonyms(tokens);
+  const scoped = getScopedSkills();
+
+  const scored = scoped.map(s => ({
+    skill: s,
+    score: computeSmartScore(s, tokens, expandedTokens),
+  }));
+
+  const filtered = scored.filter(s => s.score > 0);
+  filtered.sort((a, b) => b.score - a.score);
+
+  return filtered.map(s => s.skill);
+}
+
+// Returns scored results with metadata (for MCP and CLI)
+function matchSkillsScored(query) {
+  if (!query || !query.trim()) {
+    return getScopedSkills().map(s => ({
+      name: s.name,
+      description: s.description,
+      triggers: s.triggers,
+      score: 0,
+      family: formatFamilySummary(s.name),
+      active: activeSkills.has(s.name),
+    }));
+  }
+  const tokens = tokenize(query);
+  const expandedTokens = expandSynonyms(tokens);
+  const scoped = getScopedSkills();
+
+  const scored = scoped.map(s => ({
+    name: s.name,
+    description: s.description,
+    triggers: s.triggers,
+    score: computeSmartScore(s, tokens, expandedTokens),
+    family: formatFamilySummary(s.name),
+    active: activeSkills.has(s.name),
+  }));
+
+  const filtered = scored.filter(s => s.score > 0);
+  filtered.sort((a, b) => b.score - a.score);
+
+  return filtered;
 }
 
 // ── Lifecycle: Relevance Engine ─────────────────────────────────
@@ -456,6 +693,48 @@ function formatFamilySummary(skillName) {
   return `Family: ${others.slice(0, 3).join(', ')}, and ${count - 3} more`;
 }
 
+// ── Simple mode: plain JSON for local models ──────────────────
+
+if (simpleMode) {
+  function simpleOutput() {
+    switch (cliMode) {
+      case 'list': {
+        const all = getScopedSkills();
+        return { skills: all.map(s => ({ name: s.name, description: s.description, triggers: s.triggers })) };
+      }
+      case 'match': {
+        const results = matchSkillsScored(cliArg);
+        return { query: cliArg, count: results.length, results };
+      }
+      case 'get': {
+        const skill = skills.find(s => s.name === cliArg || s.id === cliArg);
+        if (!skill) return { error: `Skill "${cliArg}" not found` };
+        if (!activeSkills.has(skill.name)) activeSkills.set(skill.name, { loadedAt: new Date(), callCount: 0 });
+        activeSkills.get(skill.name).callCount++;
+        return { name: skill.name, content: skill.fullContent, description: skill.description, triggers: skill.triggers, active_count: activeSkills.size };
+      }
+      case 'active': {
+        const loaded = getActiveSkillsWithRelevance(currentTaskContext.description || '');
+        return { context: currentTaskContext.description || null, active_count: loaded.length, tasks: loaded };
+      }
+      case 'unload': {
+        const wasActive = activeSkills.has(cliArg);
+        if (wasActive) activeSkills.delete(cliArg);
+        return { skill: cliArg, unloaded: wasActive, remaining_active: activeSkills.size };
+      }
+      case 'context': {
+        currentTaskContext = { description: cliArg, setAt: new Date() };
+        const loaded = getActiveSkillsWithRelevance(cliArg);
+        return { context: cliArg, active_count: loaded.length, tasks: loaded };
+      }
+      default:
+        return { error: 'Unknown command. Use --help.' };
+    }
+  }
+  process.stdout.write(JSON.stringify(simpleOutput(), null, 2) + '\n');
+  process.exit(0);
+}
+
 // ── CLI Mode ─────────────────────────────────────────────────────
 
 if (cliMode) {
@@ -475,14 +754,22 @@ USAGE:
   skill-dispatcher --skills-dir ./skills --active
   skill-dispatcher --skills-dir ./skills --context "building a hero section"
 
+  # Simple mode (plain JSON output — for local models)
+  skill-dispatcher --skills-dir ./skills --simple --match "database"
+
+  # Agent mode (restricted skill scope via config)
+  skill-dispatcher --skills-dir ./skills --agent-config ./agent-profile.json
+
 OPTIONS:
   -s, --skills-dir <path>   Path to skills directory (default: ./skills)
   -l, --list                List all available skills
-  -m, --match <query>       Match skills by trigger keywords
+  -m, --match <query>       Match skills by trigger keywords (smart scored)
   -g, --get <name>          Get full content of a specific skill
   -u, --unload <name>       Unload a skill (remove from active set)
   -a, --active              Show currently active (loaded) skills with relevance
   -c, --context <desc>      Set task context and get lifecycle recommendations
+      --simple              Plain JSON output (for local models that exec CLI)
+      --agent-config <path> Restrict skills per agent profile JSON
   -h, --help                Show this help
 `);
       process.exit(0);
@@ -504,18 +791,19 @@ OPTIONS:
       process.exit(0);
 
     case 'match': {
-      const matched = matchSkills(cliArg);
-      if (matched.length === 0) {
+      const scored = matchSkillsScored(cliArg);
+      if (scored.length === 0) {
         console.log(`\n  No skills matched "${cliArg}"\n`);
         process.exit(0);
       }
-      console.log(`\n  ${matched.length} skill(s) matched "${cliArg}":\n`);
-      for (const s of matched) {
-        const active = activeSkills.has(s.name) ? ' [ACTIVE]' : '';
-        console.log(`  ${s.name}${active}`);
+      console.log(`\n  ${scored.length} skill(s) matched "${cliArg}" (sorted by relevance):\n`);
+      for (const s of scored) {
+        const active = s.active ? ' [ACTIVE]' : '';
+        const scoreBar = s.score > 0 ? ` ${'█'.repeat(Math.min(Math.round(s.score), 10))}${'░'.repeat(Math.max(10 - Math.round(s.score), 0))} ${s.score}` : '';
+        console.log(`  ${(s.name + active).padEnd(28)}${scoreBar}`);
         console.log(`  ${(s.description || '').split('\n')[0].slice(0, 80)}`);
         console.log(`  Triggers: ${s.triggers.join(', ') || '—'}`);
-        const famStr = formatFamilySummary(s.name);
+        const famStr = s.family;
         if (famStr) console.log(`  ${famStr}`);
         console.log();
       }
@@ -717,18 +1005,20 @@ rl.on('line', (line) => {
               });
               break;
             }
-            const matched = matchSkills(query);
-            if (matched.length === 0) {
+            const scored = matchSkillsScored(query);
+            if (scored.length === 0) {
               respond(id, {
                 content: [{ type: 'text', text: `No skills matched "${rawQuery}".\n\nAvailable: ${getScopedSkills().map(s => s.name).join(', ')}` }],
               });
               break;
             }
-            const text = matched.map(s => {
-              const active = activeSkills.has(s.name) ? ' **[ACTIVE]**' : '';
-              const familyStr = formatFamilySummary(s.name);
+            const scoreRank = scored.length > 1 ? `\n\n_Ranked by smart score — top match: **${scored[0].name}** (${scored[0].score})_\n` : '';
+            const text = scored.map(s => {
+              const active = s.active ? ' **[ACTIVE]**' : '';
+              const scoreStr = s.score > 0 ? ` _(score: ${s.score})_` : '';
+              const familyStr = s.family;
               const familyLine = familyStr ? `\n${familyStr}` : '';
-              return `### ${s.name}${active}\n**${s.description || 'No description'}**\nTriggers: ${s.triggers.join(', ') || '—'}${familyLine}`;
+              return `### ${s.name}${active}${scoreStr}\n**${s.description || 'No description'}**\nTriggers: ${s.triggers.join(', ') || '—'}${familyLine}`;
             }).join('\n\n');
             const staleNote = currentTaskContext.description
               ? `\n\n_Context: "${currentTaskContext.description}". Call \`set_task_context\` if switching tasks._`
@@ -736,7 +1026,7 @@ rl.on('line', (line) => {
             respond(id, {
               content: [{
                 type: 'text',
-                text: `**${matched.length} skill(s)** matched "${rawQuery}":\n\n${text}\n\nCall \`get_skill\` with a name to load its full content (auto-tracked as active).${staleNote}`,
+                text: `**${scored.length} skill(s)** matched "${rawQuery}":${scoreRank}\n\n${text}\n\nCall \`get_skill\` with a name to load its full content (auto-tracked as active).${staleNote}`,
               }],
             });
             break;
