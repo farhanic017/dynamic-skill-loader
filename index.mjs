@@ -17,8 +17,9 @@
 
 // ── All internal logging goes to stderr (never stdout) to protect MCP's JSON-RPC stream ──
 
-import { readFileSync, readdirSync, existsSync } from 'fs';
-import { join, resolve } from 'path';
+import { readFileSync, readdirSync, existsSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { join, resolve, basename, dirname } from 'path';
+import { spawn, execSync } from 'child_process';
 import { createInterface } from 'readline';
 
 const args = process.argv.slice(2);
@@ -57,6 +58,20 @@ for (let i = 0; i < args.length; i++) {
   } else if (args[i] === '--agent-config') {
     agentConfigPath = args[i + 1] || null;
     i++;
+  } else if (args[i] === '--import-repo') {
+    cliMode = 'import-repo';
+    cliArg = args[i + 1] || '';
+    i++;
+  } else if (args[i] === '--agent') {
+    cliMode = 'agent';
+    cliArg = args[i + 1] || 'opencode';
+    i++;
+  } else if (args[i] === '--list-commands') {
+    cliMode = 'list-commands';
+  } else if (args[i] === '--origin') {
+    cliMode = 'origin';
+    cliArg = args[i + 1] || '';
+    i++;
   } else if (args[i] === '--help' || args[i] === '-h') {
     cliMode = 'help';
   }
@@ -72,8 +87,11 @@ let currentTaskContext = { description: '', setAt: null };
 let workspaceScope = null;
 
 function getScopedSkills() {
-  if (!workspaceScope) return skills;
-  return skills.filter(s => workspaceScope.includes(s.name));
+  let filtered = skills;
+  if (workspaceScope) filtered = filtered.filter(s => workspaceScope.includes(s.name));
+  // Apply agent format filter
+  filtered = filterSkillsByAgent(filtered, currentAgent);
+  return filtered;
 }
 
 function setWorkspaceScope(scope) {
@@ -261,7 +279,7 @@ function parseYaml(lines, startIdx, baseIndent) {
                       const subKey = subMatch[1];
                       const subVal = subMatch[2];
                       if (subVal) {
-                        objResult[subKey] = subVal.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
+                        objResult[subKey] = subVal.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1').trim();
                       } else {
                         // Gather sub-children
                         const childResult = parseYaml(lines, nextNext, nnIndent);
@@ -333,8 +351,14 @@ function parseYaml(lines, startIdx, baseIndent) {
       continue;
     }
 
-    // Simple key: value
-    result[key] = value.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
+    // Check for inline array: key: [item1, item2, ...]
+    if (value.startsWith('[') && value.endsWith(']')) {
+      result[key] = value.slice(1, -1).split(',').map(v => v.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
+      i++;
+      continue;
+    }
+    // Simple key: value (trim trailing whitespace to avoid "name " !== "name")
+    result[key] = value.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1').trim();
     i++;
   }
 
@@ -356,46 +380,357 @@ function parseSkillMd(content) {
   const fmMatch = normalized.match(/^---\n([\s\S]*?)\n(?:---\s*)?(?:\n|$)/);
   if (!fmMatch) return null;
   const fm = parseFrontmatter(fmMatch[1]);
+  const rawTriggers = fm.triggers;
+  let triggers = [];
+  if (Array.isArray(rawTriggers)) {
+    triggers = rawTriggers;
+  } else if (typeof rawTriggers === 'string' && rawTriggers.trim()) {
+    triggers = rawTriggers.split(',').map(t => t.trim().replace(/^"(.*)"$/, '$1')).filter(t => t);
+  } else if (Array.isArray(fm.tags)) {
+    triggers = fm.tags;
+  } else if (typeof fm.tags === 'string' && fm.tags.trim()) {
+    triggers = fm.tags.split(',').map(t => t.trim().replace(/^"(.*)"$/, '$1')).filter(t => t);
+  }
   return {
     name: fm.name || '',
     description: fm.description || '',
-    triggers: Array.isArray(fm.triggers) ? fm.triggers : [],
+    triggers,
   };
 }
 // ── Skill Index ──────────────────────────────────────────────────
 
 const skills = [];
+const importedRepos = new Map(); // repoName → { origin, skills, commands }
+const commandRegistry = new Map(); // commandName → { description, content, origin }
+
+function skillMdPath(subDir) {
+  const candidates = ['SKILL.md', 'skill.md', 'Skill.md', 'SKILL.MD'];
+  for (const c of candidates) {
+    const p = join(subDir, c);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+function findSkillDirs(dir, maxDepth = 4, currentDepth = 0) {
+  const results = [];
+  if (currentDepth > maxDepth) return results;
+  if (!existsSync(dir)) return results;
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const subDir = join(dir, entry.name);
+    // Skip hidden directories and node_modules
+    if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+    const mdPath = skillMdPath(subDir);
+    if (mdPath) {
+      results.push({ dir: subDir, mdPath });
+    } else {
+      results.push(...findSkillDirs(subDir, maxDepth, currentDepth + 1));
+    }
+  }
+  return results;
+}
+
+function parseSkillMdGemini(content) {
+  // Gemini-style: GEMINI.md or markdown in .gemini/skills/ directories
+  // Usually has a description blockquote after the heading
+  if (!content) return null;
+  const normalized = content.replace(/\r\n|\r/g, '\n');
+  const nameMatch = normalized.match(/^#\s+(.+)/m);
+  const descMatch = normalized.match(/^>\s*(.+)/m);
+  // Require both heading AND blockquote description for Gemini format
+  if (nameMatch && descMatch && descMatch[1].trim().length > 5) {
+    return {
+      name: nameMatch[1].trim().toLowerCase().replace(/\s+/g, '-'),
+      description: descMatch[1].trim(),
+      triggers: [nameMatch[1].trim().toLowerCase()],
+    };
+  }
+  return null;
+}
+
+function parseSkillMdPlain(content, filePath) {
+  if (!content) return null;
+  const normalized = content.replace(/\r\n|\r/g, '\n');
+  // Infer name from filename (directory name) or first H1
+  const nameFromPath = filePath ? basename(dirname(filePath)) : '';
+  // Remove common suffixes from inferred name
+  const cleanName = nameFromPath.replace(/\.(md|markdown)$/i, '');
+  const nameMatch = normalized.match(/^#\s+(.+)/m);
+  const name = nameMatch ? nameMatch[1].trim() : (cleanName || 'unnamed');
+  const descMatch = normalized.match(/^##?\s+Description\s*\n([^#\n]+)/im) ||
+                    normalized.match(/^(?:This skill|This guide|This tool|This agent)\s+(.+)/im);
+  return {
+    name: name.toLowerCase().replace(/\s+/g, '-'),
+    description: descMatch ? descMatch[1].trim().slice(0, 200) : '',
+    triggers: name.split(/\s+/).filter(w => w.length > 2).map(w => w.toLowerCase()),
+  };
+}
+
+function parseSkillMdCommand(content, filePath) {
+  // Parse .claude/commands/*.md format: YAML frontmatter with description
+  if (!content) return null;
+  const normalized = content.replace(/\r\n|\r/g, '\n');
+  const fmMatch = normalized.match(/^---\n([\s\S]*?)\n(?:---\s*)?(?:\n|$)/);
+  if (!fmMatch) return null;
+  const fm = parseFrontmatter(fmMatch[1]);
+  const body = normalized.replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+  const name = basename(filePath || '').replace(/\.md$/i, '') || fm.name || 'command';
+  return {
+    name,
+    description: fm.description || 'Custom command',
+    triggers: fm.triggers || [name],
+    isCommand: true,
+    commandBody: body,
+  };
+}
+
+function isBinaryContent(content) {
+  // Check for null bytes which indicate binary content
+  return content.includes('\0');
+}
+
+function parseSkillMdAdvanced(content, filePath) {
+  if (!content) return null;
+  // Reject binary content (null bytes)
+  if (isBinaryContent(content)) return null;
+  // Reject very short content (under ~120 chars) - likely not a real skill
+  if (content.length < 120) return null;
+  // Pattern A: Standard YAML frontmatter (OpenCode-style)
+  const standard = parseSkillMd(content);
+  if (standard && standard.name) return { ...standard, format: 'standard' };
+
+  // Pattern B: Command format (.claude/commands/*.md)
+  if (filePath && filePath.includes('commands')) {
+    const cmd = parseSkillMdCommand(content, filePath);
+    if (cmd) return { ...cmd, format: 'command' };
+  }
+
+  // Pattern C: Gemini-style
+  const gemini = parseSkillMdGemini(content);
+  if (gemini) return { ...gemini, format: 'gemini' };
+
+  // Pattern D: Plain markdown with heading
+  const plain = parseSkillMdPlain(content, filePath);
+  if (plain && plain.name) return { ...plain, format: 'plain' };
+
+  return null;
+}
+
+function indexSkillFromDir(dir, origin = 'local', mdPathOverride) {
+  const mdPath = mdPathOverride || skillMdPath(dir);
+  if (!mdPath) return null;
+  try {
+    const rawBuf = readFileSync(mdPath);
+    const content = rawBuf.toString('utf-8');
+    // Reject binary content before parsing (check raw buffer for null bytes)
+    if (isBinaryContent(content) || rawBuf.includes(0)) return null;
+    // Try standard parser first (backward compat), then advanced
+    let meta = parseSkillMd(content);
+    if (meta === null) {
+      meta = parseSkillMdAdvanced(content, mdPath);
+    }
+    if (meta && (meta.name || (Array.isArray(meta.triggers) && meta.triggers.length > 0) || meta.description)) {
+      const skillName = meta.name || basename(dir);
+      const domain = basename(dirname(dir));
+      // Plain/Gemini formats: require at least some triggers or description to be valid
+      const fmt = meta.format || 'standard';
+      if (fmt !== 'standard') {
+        const hasTriggers = Array.isArray(meta.triggers) && meta.triggers.length > 0;
+        const hasDesc = (meta.description || '').length > 5;
+        if (!hasTriggers && !hasDesc) return null;
+      }
+      return {
+        id: basename(dir),
+        dir,
+        name: skillName,
+        description: meta.description || '',
+        triggers: Array.isArray(meta.triggers) ? meta.triggers : [],
+        fullContent: content,
+        origin,
+        domain: domain === basename(dir) ? '' : domain,
+        format: fmt,
+        isCommand: !!meta.isCommand,
+        commandBody: meta.commandBody || '',
+      };
+    }
+  } catch (err) {
+    console.error(`[skill-dispatcher] Error reading ${mdPath}: ${err.message}`);
+  }
+  return null;
+}
+
+function indexCommandsFromDir(commandsDir, origin = 'local') {
+  const count = { before: commandRegistry.size };
+  if (!existsSync(commandsDir)) return;
+  const scanCommands = (dir) => {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        scanCommands(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        try {
+          const content = readFileSync(fullPath, 'utf-8');
+          const meta = parseSkillMdCommand(content, fullPath);
+          if (meta) {
+            commandRegistry.set(meta.name, {
+              description: meta.description,
+              content: meta.commandBody || content,
+              origin,
+              path: fullPath,
+            });
+          }
+        } catch {}
+      }
+    }
+  };
+  scanCommands(commandsDir);
+  const added = commandRegistry.size - count.before;
+  if (added > 0) console.error(`[skill-dispatcher] Indexed ${added} command(s) from ${commandsDir}`);
+}
 
 function indexSkills() {
   if (!existsSync(SKILLS_DIR)) {
     console.error(`[skill-dispatcher] Skills directory not found: ${SKILLS_DIR}`);
     return;
   }
-  const entries = readdirSync(SKILLS_DIR, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const dir = join(SKILLS_DIR, entry.name);
-    const mdPath = join(dir, 'SKILL.md');
-    if (!existsSync(mdPath)) {
-      console.error(`[skill-dispatcher] Skipping ${entry.name}: no SKILL.md found`);
-      continue;
-    }
-    try {
-      const content = readFileSync(mdPath, 'utf-8');
-      const meta = parseSkillMd(content);
-      if (meta) {
-        skills.push({ id: entry.name, dir, ...meta, fullContent: content });
+  skills.length = 0;
+  const dirs = findSkillDirs(SKILLS_DIR, 4);
+  const seenNames = new Set();
+  for (const entry of dirs) {
+    const dir = typeof entry === 'string' ? entry : entry.dir;
+    const mdPathOverride = typeof entry === 'string' ? null : entry.mdPath;
+    const skill = indexSkillFromDir(dir, 'local', mdPathOverride);
+    if (skill) {
+      // Deduplicate by name
+      if (!seenNames.has(skill.name)) {
+        seenNames.add(skill.name);
+        skills.push(skill);
       } else {
-        console.error(`[skill-dispatcher] Skipping ${entry.name}: invalid YAML frontmatter`);
+        // Skill with same name exists, keep the one with more triggers
+        const existing = skills.find(s => s.name === skill.name);
+        if (skill.triggers.length > (existing?.triggers.length || 0)) {
+          const idx = skills.indexOf(existing);
+          skills[idx] = skill;
+        }
       }
-    } catch (err) {
-      console.error(`[skill-dispatcher] Skipping ${entry.name}: ${err.message}`);
     }
   }
-  console.error(`[skill-dispatcher] Loaded ${skills.length} skills from ${SKILLS_DIR}`);
+  // Also index commands from .claude/commands/ if present
+  const claudeCommandsDir = join(SKILLS_DIR, '..', '.claude', 'commands');
+  indexCommandsFromDir(claudeCommandsDir, 'local');
+  const claudeCommandsDirAlt = join(dirname(SKILLS_DIR), '.claude', 'commands');
+  if (claudeCommandsDirAlt !== claudeCommandsDir) {
+    indexCommandsFromDir(claudeCommandsDirAlt, 'local');
+  }
+  console.error(`[skill-dispatcher] Loaded ${skills.length} skills from ${SKILLS_DIR}${commandRegistry.size > 0 ? ` (${commandRegistry.size} commands)` : ''}`);
 }
 
 indexSkills();
+
+// ── Agent Routing Table ─────────────────────────────────────────
+// Maps AI tool names to compatible skill categories/formats.
+// Skills tagged with these categories are visible to the agent.
+
+const AGENT_ROUTING = {
+  opencode: { match: ['standard', 'plain', 'gemini', 'command'], desc: 'Default OpenCode agent' },
+  claude: { match: ['standard', 'command', 'gemini', 'plain'], desc: 'Claude Code / Claude Desktop' },
+  cursor: { match: ['standard', 'plain'], desc: 'Cursor editor' },
+  aider: { match: ['standard', 'plain'], desc: 'Aider CLI' },
+  windsurf: { match: ['standard', 'plain', 'gemini'], desc: 'Windsurf editor' },
+  codex: { match: ['standard', 'command', 'plain'], desc: 'Codex CLI' },
+  gemini: { match: ['gemini', 'standard', 'plain'], desc: 'Gemini CLI' },
+  antigravity: { match: ['standard', 'command', 'plain', 'gemini'], desc: 'Antigravity 1.x/2.x' },
+  kilocode: { match: ['standard', 'plain'], desc: 'Kilo Code' },
+  augment: { match: ['standard', 'plain', 'command'], desc: 'Augment Code' },
+  hermes: { match: ['standard', 'gemini', 'plain'], desc: 'Hermes CLI' },
+  'mistral-vibe': { match: ['standard', 'plain'], desc: 'Mistral Vibe' },
+  openclaw: { match: ['standard', 'plain', 'gemini'], desc: 'OpenClaw' },
+};
+
+let currentAgent = 'opencode';
+
+function setAgent(agentName) {
+  const key = agentName.toLowerCase().trim();
+  if (AGENT_ROUTING[key]) {
+    currentAgent = key;
+    return `Agent set to: ${key} (${AGENT_ROUTING[key].desc})`;
+  }
+  // Try fuzzy match
+  const match = Object.keys(AGENT_ROUTING).find(a => a.includes(key) || key.includes(a));
+  if (match) {
+    currentAgent = match;
+    return `Agent set to: ${match} (fuzzy matched from "${agentName}")`;
+  }
+  return `Unknown agent "${agentName}". Using default: opencode. Available: ${Object.keys(AGENT_ROUTING).join(', ')}`;
+}
+
+function filterSkillsByAgent(skillList, agentName) {
+  const key = (agentName || currentAgent).toLowerCase().trim();
+  const routing = AGENT_ROUTING[key];
+  if (!routing) return skillList; // No filtering for unknown agents
+  return skillList.filter(s => routing.match.includes(s.format || 'standard'));
+}
+
+function filterSkillsByOrigin(skillList, origin) {
+  if (!origin || origin === 'all') return skillList;
+  return skillList.filter(s => s.origin === origin);
+}
+
+// ── External Repo Importer ──────────────────────────────────────
+
+function importRepo(url) {
+  const repoName = url.replace(/\.git$/, '').split('/').pop().replace(/[^a-z0-9_-]/gi, '_');
+  const repoDir = join(SKILLS_DIR, '..', '.imported', repoName);
+
+  if (importedRepos.has(repoName)) {
+    return `Repo "${repoName}" already imported. ${importedRepos.get(repoName).skills.length} skills loaded.`;
+  }
+
+  try {
+    console.error(`[skill-dispatcher] Cloning ${url} → ${repoDir}...`);
+    if (existsSync(repoDir)) {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+    mkdirSync(repoDir, { recursive: true });
+    execSync(`git clone --depth 1 --single-branch "${url}" "${repoDir}"`, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 60000,
+      encoding: 'utf-8',
+    });
+    console.error(`[skill-dispatcher] Clone complete. Indexing skills...`);
+
+    // Index all SKILL.md found in the repo
+    const skillDirs = findSkillDirs(repoDir, 6);
+    const repoSkills = [];
+    const seenNames = new Set();
+    for (const entry of skillDirs) {
+      const dir = typeof entry === 'string' ? entry : entry.dir;
+      const mdPathOverride = typeof entry === 'string' ? null : entry.mdPath;
+      const skill = indexSkillFromDir(dir, repoName, mdPathOverride);
+      if (skill && !seenNames.has(skill.name)) {
+        seenNames.add(skill.name);
+        repoSkills.push(skill);
+        skills.push(skill);
+      }
+    }
+
+    // Index commands from .claude/commands/
+    const commandsDir = join(repoDir, '.claude', 'commands');
+    indexCommandsFromDir(commandsDir, repoName);
+
+    importedRepos.set(repoName, { origin: repoName, skills: repoSkills, dir: repoDir });
+    console.error(`[skill-dispatcher] Imported ${repoSkills.length} skills from ${repoName}`);
+    return `Imported ${repoSkills.length} skills from "${repoName}". Total skills: ${skills.length}. Commands: ${commandRegistry.size}`;
+  } catch (err) {
+    console.error(`[skill-dispatcher] Import failed for ${url}: ${err.message}`);
+    // Cleanup failed clone
+    try { rmSync(repoDir, { recursive: true, force: true }); } catch {}
+    return `Import failed: ${err.message}`;
+  }
+}
 
 // ── Agent Config (optional) ─────────────────────────────────────
 // Restricts skills based on an agent's JSON profile.
@@ -727,6 +1062,21 @@ if (simpleMode) {
         const loaded = getActiveSkillsWithRelevance(cliArg);
         return { context: cliArg, active_count: loaded.length, tasks: loaded };
       }
+      case 'import-repo': {
+        const result = importRepo(cliArg);
+        return { message: result, imported_repos: [...importedRepos.keys()], total_skills: skills.length };
+      }
+      case 'agent': {
+        const msg = setAgent(cliArg);
+        return { message: msg, current_agent: currentAgent };
+      }
+      case 'list-commands': {
+        return { commands: [...commandRegistry.entries()].map(([name, meta]) => ({ name, description: meta.description, origin: meta.origin })) };
+      }
+      case 'origin': {
+        const filtered = filterSkillsByOrigin(skills, cliArg);
+        return { origin: cliArg || 'all', count: filtered.length, skills: filtered.map(s => ({ name: s.name, origin: s.origin, format: s.format })) };
+      }
       default:
         return { error: 'Unknown command. Use --help.' };
     }
@@ -741,7 +1091,7 @@ if (cliMode) {
   switch (cliMode) {
     case 'help':
       console.log(`
-skill-dispatcher — On-demand skill loader with smart lifecycle management
+skill-dispatcher v3.0 — Universal Skill Loader with Multi-Repo / Multi-Agent support
 
 USAGE:
   # MCP server mode (for AI tools like opencode, Claude, Cursor)
@@ -754,6 +1104,18 @@ USAGE:
   skill-dispatcher --skills-dir ./skills --active
   skill-dispatcher --skills-dir ./skills --context "building a hero section"
 
+  # Import skills from external GitHub repo
+  skill-dispatcher --skills-dir ./skills --import-repo https://github.com/alirezarezvani/claude-skills
+
+  # Filter skills for a specific AI agent
+  skill-dispatcher --skills-dir ./skills --agent cursor --list
+
+  # List custom commands (.claude/commands/*.md)
+  skill-dispatcher --skills-dir ./skills --list-commands
+
+  # Filter skills by origin (local, imported-repo-name)
+  skill-dispatcher --skills-dir ./skills --origin claude-skills --list
+
   # Simple mode (plain JSON output — for local models)
   skill-dispatcher --skills-dir ./skills --simple --match "database"
 
@@ -761,16 +1123,22 @@ USAGE:
   skill-dispatcher --skills-dir ./skills --agent-config ./agent-profile.json
 
 OPTIONS:
-  -s, --skills-dir <path>   Path to skills directory (default: ./skills)
-  -l, --list                List all available skills
-  -m, --match <query>       Match skills by trigger keywords (smart scored)
-  -g, --get <name>          Get full content of a specific skill
-  -u, --unload <name>       Unload a skill (remove from active set)
-  -a, --active              Show currently active (loaded) skills with relevance
-  -c, --context <desc>      Set task context and get lifecycle recommendations
-      --simple              Plain JSON output (for local models that exec CLI)
-      --agent-config <path> Restrict skills per agent profile JSON
-  -h, --help                Show this help
+  -s, --skills-dir <path>      Path to skills directory (default: ./skills)
+  -l, --list                   List all available skills
+  -m, --match <query>          Match skills by trigger keywords (smart scored)
+  -g, --get <name>             Get full content of a specific skill
+  -u, --unload <name>          Unload a skill (remove from active set)
+  -a, --active                 Show currently active (loaded) skills with relevance
+  -c, --context <desc>         Set task context and get lifecycle recommendations
+      --import-repo <url>      Clone and index skills from a GitHub repo
+      --agent <name>           Filter skills for a specific AI agent
+      --list-commands          List custom commands from .claude/commands/
+      --origin <name>          Filter skills by origin (local or repo name)
+      --simple                 Plain JSON output (for local models that exec CLI)
+      --agent-config <path>    Restrict skills per agent profile JSON
+  -h, --help                   Show this help
+
+SUPPORTED AGENTS: ${Object.keys(AGENT_ROUTING).join(', ')}
 `);
       process.exit(0);
 
@@ -877,6 +1245,45 @@ OPTIONS:
       if (staleNames.length > 0) {
         console.log(`\n  → Unload recommendation: ${staleNames.join(', ')}`);
         console.log(`    These skills have low relevance to "${cliArg.split(' ').slice(0, 6).join(' ')}..."`);
+      }
+      console.log();
+      process.exit(0);
+    }
+
+    case 'import-repo': {
+      const result = importRepo(cliArg);
+      console.log(`\n  ${result}\n`);
+      process.exit(0);
+    }
+
+    case 'agent': {
+      const msg = setAgent(cliArg);
+      const scoped = filterSkillsByAgent(skills, currentAgent);
+      console.log(`\n  ${msg}`);
+      console.log(`  ${scoped.length} of ${skills.length} skills compatible with ${currentAgent}\n`);
+      process.exit(0);
+    }
+
+    case 'list-commands': {
+      if (commandRegistry.size === 0) {
+        console.log('\n  No custom commands found.\n');
+        process.exit(0);
+      }
+      console.log(`\n  ${commandRegistry.size} custom command(s):\n`);
+      for (const [name, meta] of commandRegistry) {
+        console.log(`  /${name.padEnd(30)} ${meta.description}`);
+      }
+      console.log();
+      process.exit(0);
+    }
+
+    case 'origin': {
+      const filtered = filterSkillsByOrigin(skills, cliArg);
+      const note = cliArg ? ` (origin: ${cliArg})` : ' (all origins)';
+      console.log(`\n  ${filtered.length} skill(s)${note}\n`);
+      for (const s of filtered) {
+        const desc = (s.description || '').split('\n')[0].slice(0, 60);
+        console.log(`  ${s.name.padEnd(24)} [${s.origin.padEnd(12)}] ${desc}`);
       }
       console.log();
       process.exit(0);
@@ -989,12 +1396,44 @@ rl.on('line', (line) => {
                 required: ['scope'],
               },
             },
+            {
+              name: 'import_repo',
+              description: 'Clone and index all skills from an external GitHub repo. Skills are tagged with the repo name as origin and merged into the main skill index.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  url: { type: 'string', description: 'GitHub repo URL to import (e.g., https://github.com/alirezarezvani/claude-skills)' },
+                },
+                required: ['url'],
+              },
+            },
+            {
+              name: 'list_commands',
+              description: 'List all custom commands indexed from .claude/commands/ directories across all imported repos and local skills. Commands are /command-name style.',
+              inputSchema: { type: 'object', properties: {} },
+            },
+            {
+              name: 'set_agent',
+              description: 'Set the current AI agent to filter skills by compatibility. Skills in formats incompatible with the agent will be hidden from match_skills and list_skills.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', description: `Agent name. Supported: ${Object.keys(AGENT_ROUTING).join(', ')}` },
+                },
+                required: ['name'],
+              },
+            },
           ],
         });
         break;
 
       case 'tools/call': {
-        const { name, arguments: args } = params;
+        if (!params || !params.name) {
+          respond(id, { content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid params: name required' }) }] });
+          break;
+        }
+        const name = params.name.toLowerCase();
+        const args = params.arguments || {};
         switch (name) {
           case 'match_skills': {
             const rawQuery = args?.query || '';
@@ -1169,7 +1608,11 @@ rl.on('line', (line) => {
             } else {
               setWorkspaceScope(scope);
               const scoped = getScopedSkills();
-              respond(id, { content: [{ type: 'text', text: `Workspace scoped to ${scoped.length} skill(s).\n\nOnly these skills are now visible to \`match_skills\` and \`list_skills\`.\nUse \`set_workspace\` with an empty scope to reset.` }] });
+              if (workspaceScope === null) {
+                respond(id, { content: [{ type: 'text', text: `Workspace reset. All ${scoped.length} skills are now discoverable (none of the names matched).\n\nUse \`set_workspace\` with specific skill names or triggers to scope down.` }] });
+              } else {
+                respond(id, { content: [{ type: 'text', text: `Workspace scoped to ${scoped.length} skill(s).\n\nOnly these skills are now visible to \`match_skills\` and \`list_skills\`.\nUse \`set_workspace\` with an empty scope to reset.` }] });
+              }
             }
             break;
           }
@@ -1203,6 +1646,51 @@ rl.on('line', (line) => {
               output += `\n\nSet a task context with \`set_task_context\` to get relevance scores and unload recommendations.`;
             }
             respond(id, { content: [{ type: 'text', text: output }] });
+            break;
+          }
+
+          case 'import_repo': {
+            const url = args?.url || '';
+            if (!url) {
+              respond(id, { content: [{ type: 'text', text: 'Please provide a GitHub repo URL (e.g., `import_repo({ url: "https://github.com/alirezarezvani/claude-skills" })`).' }] });
+              break;
+            }
+            const result = importRepo(url);
+            const origins = [...importedRepos.keys()];
+            respond(id, {
+              content: [{ type: 'text', text: `**Import Result:** ${result}\n\n**Imported repos:** ${origins.join(', ') || 'none'}\n**Total skills:** ${skills.length}\n**Commands:** ${commandRegistry.size}` }],
+            });
+            break;
+          }
+
+          case 'list_commands': {
+            if (commandRegistry.size === 0) {
+              respond(id, { content: [{ type: 'text', text: 'No custom commands found. Import a repo with `.claude/commands/` to add commands.' }] });
+              break;
+            }
+            const cmdText = [...commandRegistry.entries()].map(([name, meta]) => {
+              return `- **/${name}**: ${meta.description} _(origin: ${meta.origin})_`;
+            }).join('\n');
+            respond(id, {
+              content: [{ type: 'text', text: `**${commandRegistry.size} custom command(s)**\n\n${cmdText}\n\nCommands are loaded from \`.claude/commands/\` directories.` }],
+            });
+            break;
+          }
+
+          case 'set_agent': {
+            const agentName = args?.name || '';
+            if (!agentName) {
+              const current = currentAgent;
+              const agents = Object.keys(AGENT_ROUTING).join(', ');
+              const msg = 'Current agent: **' + current + '**. Available agents: ' + agents + '. Call set_agent with a name to switch (e.g., set_agent({ name: "cursor" })).';
+              respond(id, { content: [{ type: 'text', text: msg }] });
+              break;
+            }
+            const msg = setAgent(agentName);
+            const scopedCount = filterSkillsByAgent(skills, currentAgent).length;
+            respond(id, {
+              content: [{ type: 'text', text: msg + '\n\n' + scopedCount + ' of ' + skills.length + ' skills are compatible with **' + currentAgent + '**.\nUse set_workspace to further scope if needed.' }],
+            });
             break;
           }
 
