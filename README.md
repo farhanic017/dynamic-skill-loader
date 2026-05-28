@@ -5,7 +5,7 @@
 
 # Dynamic Skill Loader v3.0 — Universal Skill Dispatcher with Multi-Format Parsing, Agent Routing & External Repo Import
 
-> Created by [Farhan Dhrubo](https://github.com/farhanic017) — [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader-for-opencode/issues)
+> Created by [Farhan Dhrubo](https://github.com/farhanic017) — [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader-for/issues)
 
 An MCP server and CLI that loads skills **on-demand** from any source, in any format, for any AI coding agent. Supports **4 skill formats**, **14 AI agents**, **nested multi-domain skills**, **external GitHub repo import**, and **intelligent lifecycle management** — zero-config.
 
