@@ -15,8 +15,8 @@ An MCP server and CLI that loads skills **on-demand** from any source, in any fo
 
 ### Via git clone
 ```bash
-git clone --depth 1 --single-branch https://github.com/farhanic017/dynamic-skill-loader-for-opencode.git
-cd dynamic-skill-loader-for-opencode
+git clone --depth 1 --single-branch https://github.com/farhanic017/dynamic-skill-loader.git
+cd dynamic-skill-loader
 node index.mjs --skills-dir ./skills
 ```
 
@@ -32,7 +32,7 @@ npx skill-dispatcher --skills-dir ./skills
     "skill-dispatcher": {
       "type": "local",
       "enabled": true,
-      "command": ["node", "/path/to/dynamic-skill-loader-for-opencode/index.mjs", "--skills-dir", "/path/to/your/skills"]
+      "command": ["node", "/path/to/dynamic-skill-loader/index.mjs", "--skills-dir", "/path/to/your/skills"]
     }
   }
 }
