@@ -222,14 +222,27 @@ function parseYaml(lines, startIdx, baseIndent) {
     // Stop if we reach a line with less indentation than base
     const indent = line.length - line.trimStart().length;
     if (baseIndent !== undefined && indent < baseIndent) break;
-    // Stop at closing delimiter
-    if (trimmed === '---') { i++; break; }
+    // Stop at document delimiters
+    if (trimmed === '---' || trimmed === '...') { i++; break; }
 
-    const match = trimmed.match(/^([\w-]+):\s*(.*)$/);
-    if (!match) { i++; continue; }
+    // Find the first colon to split key:value, handling all key types:
+    //   key: value, <<: *ref, "quoted key": val, 'key': val, some.key: val, ключ: знач
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx === -1) { i++; continue; }
+    let rawKey = trimmed.slice(0, colonIdx);
+    let value = trimmed.slice(colonIdx + 1).trimStart();
+    // Unquote key if quoted
+    if ((rawKey.startsWith('"') && rawKey.endsWith('"')) || (rawKey.startsWith("'") && rawKey.endsWith("'"))) {
+      rawKey = rawKey.slice(1, -1);
+    }
+    const key = rawKey.replace(/\s+/g, ' ').trim();
+    if (!key) { i++; continue; }
 
-    const key = match[1];
-    let value = match[2];
+    // Detect YAML anchor (&name) in value and strip it
+    const anchorMatch = value.match(/^&([^\s]+)/);
+    if (anchorMatch) {
+      value = value.slice(anchorMatch[0].length).trimStart();
+    }
 
     if (value === '|') {
       // Literal block (description: |)
@@ -274,12 +287,20 @@ function parseYaml(lines, startIdx, baseIndent) {
                     const subResult = parseYaml(lines, li, cindent);
                     // subResult starts at li, which has '- key: value' — parse as object
                     const objResult = {};
-                    const subMatch = ctrimmed.match(/^- ([\w-]+):\s*(.*)$/);
-                    if (subMatch) {
-                      const subKey = subMatch[1];
-                      const subVal = subMatch[2];
+                    const subColon = itemContent.indexOf(':');
+                    let subKey = '';
+                    let subVal = itemContent;
+                    if (subColon !== -1) {
+                      let rk = itemContent.slice(0, subColon);
+                      const skQuoted = (rk.startsWith('"') && rk.endsWith('"')) || (rk.startsWith("'") && rk.endsWith("'"));
+                      if (skQuoted) rk = rk.slice(1, -1);
+                      subKey = rk.trim();
+                      subVal = itemContent.slice(subColon + 1).trimStart();
+                    }
+                    if (subKey) {
                       if (subVal) {
-                        objResult[subKey] = subVal.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1').trim();
+                        const svq = (subVal.startsWith('"') && subVal.endsWith('"')) || (subVal.startsWith("'") && subVal.endsWith("'"));
+                        objResult[subKey] = svq ? subVal.slice(1, -1) : subVal.trim();
                       } else {
                         // Gather sub-children
                         const childResult = parseYaml(lines, nextNext, nnIndent);
@@ -292,10 +313,12 @@ function parseYaml(lines, startIdx, baseIndent) {
                     if (Object.keys(objResult).length > 0) items.push(objResult);
                   } else {
                     // Simple list item (string)
-                    items.push(itemContent.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
+                    const iq = (itemContent.startsWith('"') && itemContent.endsWith('"')) || (itemContent.startsWith("'") && itemContent.endsWith("'"));
+                    items.push(iq ? itemContent.slice(1, -1) : itemContent);
                   }
                 } else {
-                  items.push(itemContent.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
+                  const iq = (itemContent.startsWith('"') && itemContent.endsWith('"')) || (itemContent.startsWith("'") && itemContent.endsWith("'"));
+                  items.push(iq ? itemContent.slice(1, -1) : itemContent);
                 }
                 li++;
               } else if (cindent > indent) {
@@ -324,15 +347,19 @@ function parseYaml(lines, startIdx, baseIndent) {
               const tindent = tl.length - tl.trimStart().length;
               if (tindent < nextIndent && ttrimmed) break;
               // Check if this line defines a key (potential next sibling)
-              const tmatch = ttrimmed.match(/^([\w-]+):/);
-              if (tmatch) {
-                const maybeKey = tmatch[1];
+            const tColon = ttrimmed.indexOf(':');
+            const tHasKey = tColon !== -1 && ttrimmed.slice(0, tColon).trim().length > 0;
+            if (tHasKey) {
+              const maybeKey = ttrimmed.slice(0, tColon).replace(/^["']|["']$/g, '').trim();
                 // If we've seen all keys in subResult and encounter a new key at this indentation, stop
                 const subKeys = Object.keys(subResult);
                 const seenSoFar = new Set();
                 for (let checkIdx = nextIdx; checkIdx <= tempIdx; checkIdx++) {
-                  const ck = lines[checkIdx].trim().match(/^([\w-]+):/);
-                  if (ck) seenSoFar.add(ck[1]);
+                  const ckLine = lines[checkIdx].trim();
+                  const ckColon = ckLine.indexOf(':');
+                  if (ckColon !== -1 && ckLine.slice(0, ckColon).trim().length > 0) {
+                    seenSoFar.add(ckLine.slice(0, ckColon).replace(/^["']|["']$/g, '').trim());
+                  }
                 }
                 if (subKeys.every(sk => seenSoFar.has(sk)) && tindent === nextIndent) {
                   break;
@@ -353,12 +380,13 @@ function parseYaml(lines, startIdx, baseIndent) {
 
     // Check for inline array: key: [item1, item2, ...]
     if (value.startsWith('[') && value.endsWith(']')) {
-      result[key] = value.slice(1, -1).split(',').map(v => v.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
+      result[key] = value.slice(1, -1).split(',').map(v => { const vt = v.trim(); const q = (vt.startsWith('"') && vt.endsWith('"')) || (vt.startsWith("'") && vt.endsWith("'")); return q ? vt.slice(1, -1) : vt; });
       i++;
       continue;
     }
-    // Simple key: value (trim trailing whitespace to avoid "name " !== "name")
-    result[key] = value.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1').trim();
+    // Simple key: value — preserve quoted whitespace, trim unquoted
+    const vWasQuoted = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"));
+    result[key] = vWasQuoted ? value.slice(1, -1) : value.trim();
     i++;
   }
 
@@ -385,14 +413,14 @@ function parseSkillMd(content) {
   if (Array.isArray(rawTriggers)) {
     triggers = rawTriggers;
   } else if (typeof rawTriggers === 'string' && rawTriggers.trim()) {
-    triggers = rawTriggers.split(',').map(t => t.trim().replace(/^"(.*)"$/, '$1')).filter(t => t);
+    triggers = rawTriggers.split(',').map(t => { const tt = t.trim(); const q = (tt.startsWith('"') && tt.endsWith('"')) || (tt.startsWith("'") && tt.endsWith("'")); return q ? tt.slice(1, -1) : tt; }).filter(t => t);
   } else if (Array.isArray(fm.tags)) {
     triggers = fm.tags;
   } else if (typeof fm.tags === 'string' && fm.tags.trim()) {
-    triggers = fm.tags.split(',').map(t => t.trim().replace(/^"(.*)"$/, '$1')).filter(t => t);
+    triggers = fm.tags.split(',').map(t => { const tt = t.trim(); const q = (tt.startsWith('"') && tt.endsWith('"')) || (tt.startsWith("'") && tt.endsWith("'")); return q ? tt.slice(1, -1) : tt; }).filter(t => t);
   }
   return {
-    name: fm.name || '',
+    name: (fm.name || '').trim(),
     description: fm.description || '',
     triggers,
   };

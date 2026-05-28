@@ -1071,6 +1071,156 @@ test('MCP tools/list shows all tool definitions', async () => {
   assert(names.includes('import_repo'), 'should include import_repo');
 });
 
+// ── SECTION 11: YAML SYNTAX EDGE CASES ─────────────────────────
+console.log('  \x1b[36m[11/8] YAML Syntax: Anchors, Quoted Keys, Unicode, Multi-Doc\x1b[0m');
+
+test('Double-quoted value with colon preserved', () => {
+  resetSkills();
+  writeSkillRaw('q-colon', '---\nname: q-colon\ndescription: "hello: world"\ntriggers:\n  - t\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('q-colon'), 'double-quoted value with colon');
+});
+
+test('Single-quoted value with colon preserved', () => {
+  resetSkills();
+  writeSkillRaw('sq-colon', "---\nname: sq-colon\ndescription: 'hello: world'\ntriggers:\n  - t\n---\n");
+  const out = runCLI('--list');
+  assert(out.includes('sq-colon'), 'single-quoted value with colon');
+});
+
+test('YAML anchor on mapping with nested children', () => {
+  resetSkills();
+  writeSkillRaw('anchor-nested', '---\nname: anchor-nested\ndescription: anchor test\ndefaults: &defaults\n  timeout: 30\n  retries: 3\ntriggers:\n  - anchor\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('anchor-nested'), 'anchor on mapping');
+});
+
+test('Merge key <<: *alias parses without crash', () => {
+  resetSkills();
+  writeSkillRaw('merge-key', '---\nname: merge-key\n<<: *defaults\ndescription: merge\ntriggers:\n  - m\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('merge-key'), 'merge key <<: *alias');
+});
+
+test('Double-quoted key with spaces', () => {
+  resetSkills();
+  writeSkillRaw('dq-key', '---\nname: dq-key\n"my key": value\ndescription: quoted key\ntriggers:\n  - k\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('dq-key'), 'double-quoted key');
+});
+
+test('Single-quoted key with spaces', () => {
+  resetSkills();
+  writeSkillRaw('sq-key', "---\nname: sq-key\n'my key': value\ndescription: single-quoted key\ntriggers:\n  - k\n---\n");
+  const out = runCLI('--list');
+  assert(out.includes('sq-key'), 'single-quoted key');
+});
+
+test('Key with dots in name', () => {
+  resetSkills();
+  writeSkillRaw('dot-key', '---\nname: dot-key\nsome.key: value\ndescription: dot key\ntriggers:\n  - d\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('dot-key'), 'key with dots');
+});
+
+test('Unicode key and value', () => {
+  resetSkills();
+  writeSkillRaw('uni-key', '---\nname: uni-key\n\u043A\u043B\u044E\u0447: \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\ndescription: unicode key\ntriggers:\n  - u\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('uni-key'), 'unicode key');
+});
+
+test('Multi-doc YAML: only first document used', () => {
+  resetSkills();
+  writeSkillRaw('multi-doc', '---\nname: multi-doc\ndescription: first doc\ntriggers:\n  - m\n---\n---\nname: second\ndescription: ignored\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('multi-doc'), 'first doc extracted');
+});
+
+test('--- inside literal block does not break parsing', () => {
+  resetSkills();
+  writeSkillRaw('literal-dash', '---\nname: literal-dash\ndescription: |\n  line one\n  --- inside\n  line two\ntriggers:\n  - dash\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('literal-dash'), '--- inside literal block');
+});
+
+test('... YAML document end marker stops parsing', () => {
+  resetSkills();
+  writeSkillRaw('dot-end', '---\nname: dot-end\ndescription: dot end test\ntriggers:\n  - de\n...\n---\nname: ignored\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('dot-end'), '... end marker');
+});
+
+test('Mixed inline array + standard list in same YAML', () => {
+  resetSkills();
+  writeSkillRaw('mixed-inline', '---\nname: mixed-inline\ndescription: mixed\navailable: [a, b]\ntags:\n  - c\n  - d\ntriggers:\n  - x\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('mixed-inline'), 'mixed inline + standard list');
+});
+
+test('Quoted value leading/trailing spaces preserved in description', () => {
+  resetSkills();
+  writeSkillRaw('spaced-val', '---\nname: spaced-val\ndescription: "  leading and trailing  "\ntriggers:\n  - sp\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('spaced-val'), 'quoted spaces preserved');
+});
+
+test('Tab-indented list items', () => {
+  resetSkills();
+  writeSkillRaw('tab-list', '---\nname: tab-list\ndescription: tab indent\ntriggers:\n\t- tab-item\n---\n');
+  const out = runCLI('--match tab-item');
+  assert(out.includes('tab-list'), 'tab-indented list');
+});
+
+test('Deeply nested YAML object (3 levels)', () => {
+  resetSkills();
+  writeSkillRaw('deep-obj', '---\nname: deep-obj\ndescription: deep nested\ntriggers:\n  - deep\nconfig:\n  level1:\n    level2:\n      key: value\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('deep-obj'), 'deeply nested object');
+});
+
+test('Boolean name value (name: true)', () => {
+  resetSkills();
+  writeSkillRaw('bool-name-2', '---\nname: true\ndescription: bool name value\ntriggers:\n  - b\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('true'), 'boolean name value parsed');
+});
+
+test('Value with colon without quotes uses first colon as delimiter', () => {
+  resetSkills();
+  writeSkillRaw('unquoted-colon', '---\nname: unquoted-colon\ndescription: hello: world\ntriggers:\n  - uc\n---\n');
+  const out = runCLI('--list');
+  assert(out.includes('unquoted-colon'), 'unquoted colon value');
+});
+
+test('Empty frontmatter (---\\n---) produces no skill', () => {
+  resetSkills();
+  writeSkillRaw('empty-fm', '---\n---\n# body\n');
+  const out = runCLI('--list');
+  assert(!out.includes('empty-fm'), 'empty frontmatter not indexed');
+});
+
+test('Trigger matched from tags field (no triggers key)', () => {
+  resetSkills();
+  writeSkillRaw('tag-only-match', '---\nname: tag-only-match\ndescription: tag based\ntags:\n  - indirect\n---\n');
+  const out = runCLI('--match indirect');
+  assert(out.includes('tag-only-match'), 'match via tags');
+});
+
+test('name: preserves boolean true as string', () => {
+  resetSkills();
+  writeSkillRaw('bool-as-name', '---\nname: true\ndescription: boolean name\ntriggers:\n  - b2\n---\n');
+  const out = runCLI('--get true');
+  assert(out.includes('true'), 'get skill by boolean name');
+});
+
+test('Comma-separated inline triggers with quoted items', () => {
+  resetSkills();
+  writeSkillRaw('csv-quoted', '---\nname: csv-quoted\ndescription: csv quoted\ntriggers: ["one", "two", "three"]\n---\n');
+  const out = runCLI('--match two');
+  assert(out.includes('csv-quoted'), 'CSV inline triggers with quotes');
+});
+
 // ── Summary ────────────────────────────────────────────────────
 asyncChain.then(() => {
   const total = passed + failed + skipped;

@@ -1,24 +1,17 @@
 [![License](https://img.shields.io/badge/license-GPLv3-purple)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Node.js%2018%2B-green)]()
 [![Author](https://img.shields.io/badge/author-Farhan%20Dhrubo-red)](https://github.com/farhanic017)
+[![Tests](https://img.shields.io/badge/tests-127%20passed-brightgreen)](aggressive-test.mjs)
 
-# Dynamic Skill Loader v2.0 — Always-on skill dispatcher with intelligent lifecycle management
+# Dynamic Skill Loader v3.0 — Universal Skill Dispatcher with Multi-Format Parsing, Agent Routing & External Repo Import
 
 > Created by [Farhan Dhrubo](https://github.com/farhanic017) — [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader-for-opencode/issues)
 
-An MCP server that loads AI coding skills **on-demand** with **intelligent lifecycle management** — auto-tracking loaded skills, scoring them against your task context, and recommending stale skills for unloading.
-
-**Always-on:** Add `ALWAYS_ON.md` to your AI client's permanent instructions so the model calls `match_skills` at the start of EVERY task automatically.
-
-**Smart unload:** Skills in unrelated domains (e.g., design skills during database work) are flagged as stale — free up context tokens without thinking about it.
-
-Works with **OpenCode**, **Claude Desktop/Code**, **Cursor**, **Windsurf**, **Continue.dev**, **VS Code / VS Studio Code**, **VSCodium**, **Antigravity 1.x & 2.x**, **Aider**, and any MCP-compatible client.
+An MCP server and CLI that loads skills **on-demand** from any source, in any format, for any AI coding agent. Supports **4 skill formats**, **14 AI agents**, **nested multi-domain skills**, **external GitHub repo import**, and **intelligent lifecycle management** — zero-config.
 
 ---
 
-## 📥 Drop-in repo URL install
-
-Drop this URL into your AI assistant for fully automatic installation:
+## 📥 Drop-in install
 
 ```
 https://github.com/farhanic017/dynamic-skill-loader-for-opencode
@@ -26,264 +19,140 @@ https://github.com/farhanic017/dynamic-skill-loader-for-opencode
 
 ---
 
-## v2.0 What's new
+## v3.0 What's new
 
 | Feature | What it does |
 |---------|-------------|
-| **Task context tracking** | `set_task_context` declares what you're working on |
-| **Relevance scoring** | Each loaded skill scored against your context (0–1) |
-| **Auto-unload recommendations** | Stale skills flagged — no need to guess |
-| **Skill families** | Auto-detected from shared trigger keywords |
-| **Active skill dashboard** | `get_active_skills` shows full lifecycle status |
-| **Future-proof** | Relevance engine works with ANY skill — no config needed |
+| **4 skill formats** | Standard YAML, plain markdown, Gemini-style, command format |
+| **14 AI agent routing** | Skills auto-filtered per agent (OpenCode, Claude, Cursor, Windsurf, Aider, Gemini, Codex, Antigravity, Kilo Code, Augment, Hermes, Mistral Vibe, OpenClaw) |
+| **External repo import** | `--import-repo <url>` clones & indexes any GitHub repo's skills |
+| **Nested directory scanning** | Reads skills from `<domain>/<subdomain>/skills/<name>/SKILL.md` up to 4 levels deep |
+| **Custom command registry** | `.claude/commands/*.md` parsed as runnable commands |
+| **Cross-repo origin tracking** | Every skill tagged with its origin repo, filterable via `--origin` |
+| **Universal YAML parser** | Handles inline arrays, anchors, aliases, quoted keys, unicode, multi-doc, tab indentation |
+| **Tags fallback** | Skills with `tags:` (no `triggers:`) matched automatically |
+| **127 tests, 0 failures** | Full MCP protocol stress, encoding, boundary, and YAML syntax coverage |
 
-## How it works
-
-```
-You: "build a hero section with GSAP animations"
-       │
-       ▼
-match_skills("hero section with GSAP animations")
-       │
-       ▼
-get_skill("gsap-core")          ← auto-tracked as ACTIVE
-get_skill("frontend-design")    ← auto-tracked as ACTIVE
-       │
-       ▼
-set_task_context({ description: "building a hero section" })
-       │
-       ▼ dispatcher scores:
-          ✓ gsap-core       → relevant (0.85)
-          ✓ frontend-design → relevant (0.55)
-          → all good, keep loaded
-
-[switch to: "set up Supabase auth"]
-       │
-       ▼
-set_task_context({ description: "setting up Supabase authentication" })
-       │
-       ▼ dispatcher scores:
-          ✗ gsap-core       → stale (0.00)
-          ✗ frontend-design → stale (0.02)
-          → unload both!
-
-unload_skill("gsap-core")
-unload_skill("frontend-design")
-match_skills("supabase auth") → get_skill("supabase")
-```
-
-<img src="skill-dispatcher-demo.gif" alt="skill-dispatcher demo" width="100%" style="max-width:720px; display:block; margin:24px auto; border-radius:12px;">
-
-## 6 MCP Tools
+## 11 MCP Tools
 
 | Tool | What it does |
 |------|-------------|
-| `match_skills(query)` | Matches your task against skill `triggers` and `description` (fuzzy, hyphen/punctuation tolerant) |
-| `get_skill(name)` | Loads the full `SKILL.md` content; auto-tracks as active |
-| `list_skills()` | Browses all skills with active indicators |
-| `unload_skill(name)` | Unloads a skill; removes from active tracking |
-| `set_task_context({ description })` | Declares current task; returns relevance scores & unload recommendations |
-| `get_active_skills()` | Lists loaded skills with domain, relevance, status, call count |
+| `match_skills(query)` | Match query against skill triggers/description (fuzzy, synonym-expanded) |
+| `get_skill(name)` | Load full SKILL.md content; auto-tracks as active |
+| `list_skills()` | Browse all skills with [ACTIVE] indicators |
+| `unload_skill(name)` | Remove from active tracking |
+| `set_task_context({ description })` | Declare current task; get relevance scores & unload recommendations |
+| `get_active_skills()` | List loaded skills with domain, relevance, status, call count |
+| `set_workspace(scope)` | Restrict visible skills by name or trigger |
+| `import_repo({ url })` | Clone external repo and index its skills + commands |
+| `list_commands()` | Show all custom commands from `.claude/commands/` |
+| `set_agent({ name })` | Switch agent routing (filters skills by format compatibility) |
+| `get_publishable_keys()` | Get API keys (when configured) |
 
-## Lifecycle rules for the model
+## Supported Skill Formats
 
-The `ALWAYS_ON.md` file teaches the model to follow these rules:
-
-1. **Discover at start** — `match_skills(task)` → `get_skill()` for matches
-2. **Declare context** — `set_task_context({ description })` after loading
-3. **Keep domain families loaded** — design/animation/frontend skills stay together
-4. **Unload on domain switch** — `set_task_context` new → `unload_skill` stale ones
-5. **Never drop quality** — if unsure, keep the skill; tokens are cheap
-
-## Quick start
-
-### 1. Install
-
-```bash
-npm install -g skill-dispatcher
-```
-
-Or run directly with npx:
-
-```bash
-npx skill-dispatcher --skills-dir ./my-skills
-```
-
-### 2. Point it at your skills
-
-Each skill is a directory with a `SKILL.md` file containing YAML frontmatter:
-
+### 1. Standard YAML frontmatter (OpenCode-style)
 ```markdown
 ---
 name: gsap-core
 description: Core GSAP animation library
 triggers:
   - "gsap"
-  - "web animation"
+  - "animation"
   - "tween"
-  - "easing"
+tags:
+  - "motion"      ← optional, used as fallback triggers
+alias:
+  - "gsap-core"   ← additional aliases
 ---
 # gsap-core
 Full skill instructions here...
 ```
 
-### 3. Add to your AI tool
-
-#### OpenCode — always-on via `ALWAYS_ON.md`
-
-Add to `opencode.jsonc`:
-
-```jsonc
-{
-  "instructions": [
-    "path/to/ALWAYS_ON.md",     // <-- always-on: lifecycle rules for the model
-    "path/to/instructions.md"
-  ],
-  "mcp": {
-    "skill-dispatcher": {
-      "type": "local",
-      "command": ["npx", "skill-dispatcher", "--skills-dir", "/path/to/skills"],
-      "enabled": true
-    }
-  }
-}
-```
-
-The `ALWAYS_ON.md` injects permanent rules for skill discovery, context tracking, and lifecycle management — always-on, never forgotten.
-
-#### Claude Desktop
-
-```json
-{
-  "mcpServers": {
-    "skill-dispatcher": {
-      "command": "npx",
-      "args": ["skill-dispatcher", "--skills-dir", "/path/to/skills"]
-    }
-  }
-}
-```
-
-#### Cursor / Windsurf
-
-```
-Name: skill-dispatcher
-Type: command
-Command: npx skill-dispatcher --skills-dir /path/to/skills
-```
-
-#### Continue.dev
-
-```json
-{
-  "mcpServers": {
-    "skill-dispatcher": {
-      "command": "npx",
-      "args": ["skill-dispatcher", "--skills-dir", "/path/to/skills"]
-    }
-  }
-}
-```
-
-#### VS Code / VS Studio Code (`mcp.json`)
-
-```json
-{
-  "servers": {
-    "skill-dispatcher": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["skill-dispatcher", "--skills-dir", "/path/to/skills"]
-    }
-  }
-}
-```
-
-**Config path (user):** `%APPDATA%\Code\User\mcp.json` (Windows) or `~/Library/Application Support/Code/User/mcp.json` (macOS).
-
-#### VSCodium
-
-Same format as VSCode, config at `%APPDATA%\VSCodium\User\mcp.json` (Windows).
-
-#### Antigravity 1.x
-
-Same format as VSCode, config at `%APPDATA%\Antigravity\User\mcp.json` (Windows).
-
-#### Antigravity 2.x
-
-```json
-{
-  "mcpServers": {
-    "skill-dispatcher": {
-      "command": "npx",
-      "args": ["skill-dispatcher", "--skills-dir", "/path/to/skills"]
-    }
-  }
-}
-```
-
-Config at `%USERPROFILE%\.gemini\antigravity\mcp_config.json` (Windows).
-
-### 4. Configure instructions.md
-
+### 2. Plain markdown (no frontmatter)
 ```markdown
-## Skill-Dispatcher — ALWAYS ON AT TASK START
-- At task start: `match_skills`, load with `get_skill`
-- After loading: `set_task_context({ description })`
-- When switching domains: `set_task_context` new → `unload_skill` stale
-- `get_active_skills()` to check before unloading
-- `list_skills()` to browse when nothing matches
+# My Skill Name
+> Description in blockquote (or inferred from content)
+
+This skill has no YAML frontmatter at all.
+It must be >120 characters to be recognized.
+Name is inferred from the H1 heading or directory name.
 ```
 
-## Relevance Engine
+### 3. Gemini-style (`# heading` + `> blockquote`)
+```markdown
+# my-gemini-skill
+> This blockquote description identifies this as a Gemini-style skill
+```
 
-The dispatcher scores each loaded skill against the task context — zero-config:
+### 4. Command format (`.claude/commands/*.md`)
+```markdown
+---
+description: "Deploy the current branch to staging"
+---
+1. Run tests: `npm test`
+2. Build: `npm run build`
+3. Deploy: `npm run deploy:staging`
+```
 
-| Score | Status | Action |
-|-------|--------|--------|
-| ≥ 0.30 | Relevant ✓ | Keep loaded |
-| 0.10–0.29 | Low ~ | Keep if domain-related |
-| < 0.10 | Stale ✗ | Recommended to unload |
+## Agent Routing
 
-Scoring uses token overlap between the task context description and the
-skill's triggers, name, and description. No hardcoded domains — works
-with ANY current or future skill automatically.
+Each of the 14 supported agents sees only compatible skill formats:
 
-## Skill Families
-
-Skills that share trigger keywords form auto-detected "families".
-When you load one family member, the dispatcher suggests the others.
-Design, animation, frontend, and graphics skills naturally form
-families through their shared triggers like "design", "animation", "ui".
+| Agent | Formats |
+|-------|---------|
+| **OpenCode** | standard, plain, gemini, command |
+| **Claude Code / Desktop** | standard, command, gemini, plain |
+| **Cursor** | standard, plain |
+| **Windsurf** | standard, plain, gemini |
+| **Codex** | standard, command, plain |
+| **Gemini CLI** | gemini, standard, plain |
+| **Aider** | standard, plain |
+| **Antigravity** | standard, command, plain, gemini |
+| **Kilo Code** | standard, plain |
+| **Augment** | standard, plain, command |
+| **Hermes** | standard, gemini, plain |
+| **Mistral Vibe** | standard, plain |
+| **OpenClaw** | standard, plain, gemini |
 
 ## CLI modes
 
 ### MCP server mode (default)
-
 ```bash
 skill-dispatcher --skills-dir ./skills
 ```
 
-### Direct terminal mode
-
+### Terminal mode
 ```bash
-# List all skills (active skills marked)
-skill-dispatcher --skills-dir ./skills --list
+# List all skills
+skill-dispatcher --list
 
-# Match by trigger keywords
-skill-dispatcher --skills-dir ./skills --match "animation gsap"
+# Match by trigger
+skill-dispatcher --match "animation gsap"
 
-# Get skill (tracks as active)
-skill-dispatcher --skills-dir ./skills --get gsap-core
+# Import external repo
+skill-dispatcher --import-repo https://github.com/user/claude-skills
 
-# Set context (lifecycle recommendations)
-skill-dispatcher --skills-dir ./skills --context "building a hero section"
+# Show skills by origin
+skill-dispatcher --origin local
 
-# Show active skills with status
-skill-dispatcher --skills-dir ./skills --active
+# Switch agent
+skill-dispatcher --agent cursor
+
+# List commands
+skill-dispatcher --list-commands
+
+# Get full skill content
+skill-dispatcher --get gsap-core
+
+# Set task context
+skill-dispatcher --context "building a hero section"
+
+# Show active skills
+skill-dispatcher --active
 
 # Unload a skill
-skill-dispatcher --skills-dir ./skills --unload gsap-core
+skill-dispatcher --unload gsap-core
 ```
 
 ## Options
@@ -294,25 +163,46 @@ skill-dispatcher --skills-dir ./skills --unload gsap-core
 | `--list` | `-l` | — | List all available skills |
 | `--match` | `-m` | — | Match skills by trigger keywords |
 | `--get` | `-g` | — | Get full content of a specific skill |
-| `--unload` | `-u` | — | Unload a skill (remove from active set) |
-| `--active` | `-a` | — | Show active skills with relevance status |
-| `--context` | `-c` | — | Set task context and get recommendations |
+| `--unload` | `-u` | — | Unload a skill |
+| `--active` | `-a` | — | Show active skills with relevance |
+| `--context` | `-c` | — | Set task context |
+| `--import-repo` | — | — | Import skills from external GitHub repo |
+| `--agent` | — | `opencode` | Switch agent routing |
+| `--list-commands` | — | — | List custom commands |
+| `--origin` | — | `all` | Filter skills by origin repo |
+| `--simple` | — | — | Plain JSON output (for local models) |
+| `--agent-config` | — | — | JSON file with skill allow/block lists |
 | `--help` | `-h` | — | Show help |
+
+## YAML Features
+
+The parser handles all common YAML patterns found in skill definitions:
+
+| Feature | Example |
+|---------|---------|
+| Inline arrays | `triggers: [foo, bar]` |
+| Multi-line (\|) | `description: \|` block |
+| Anchors | `defaults: &defaults` with `<<: *defaults` |
+| Quoted keys | `"my key": value` |
+| Dots in keys | `some.key: value` |
+| Unicode keys | `ключ: значение` |
+| Multi-doc | `---\ndoc1\n---\ndoc2\n---` |
+| End marker | `...` stops parsing |
+| Tab indentation | Nested items with tabs |
+| Inline comments | `#` lines ignored |
 
 ## Project Structure
 
 ```
 skill-dispatcher/
-├── index.mjs             # MCP server & CLI (v2.0 lifecycle engine)
-├── ALWAYS_ON.md          # Permanent lifecycle instructions for AI models
-├── SKILL.md              # AI agent installation instructions
-├── install.py            # Auto-installer
-├── test.mjs              # Test suite
-├── make_gif.py           # Demo GIF generator
-├── README.md             # This file
+├── index.mjs             # MCP server & CLI (v3.0 universal dispatcher)
+├── ALWAYS_ON.md          # Permanent lifecycle instructions
+├── SKILL.md              # self-defining skill
+├── aggressive-test.mjs   # 127-test suite (MCP, encoding, YAML syntax)
+├── README.md
 ├── LICENSE               # GPL-3.0
-├── NOTICE                # Copyright and legal notices
-├── package.json          # npm metadata
+├── NOTICE
+├── package.json
 └── .gitignore
 ```
 
@@ -325,10 +215,6 @@ skill-dispatcher/
 Licensed under the **GNU General Public License v3.0**.
 See [LICENSE](./LICENSE) and [NOTICE](./NOTICE) for full details.
 
-**You may NOT** remove copyright notices, re-distribute as your own work,
-or sell without attribution. All source files contain embedded copyright.
-
 ---
 
-*Built with Node.js, MCP, and the conviction that 50+ skills should not
-load at startup — and stale ones should auto-sleep.*
+*Built with Node.js, MCP, and 127 tests that never lie.*
