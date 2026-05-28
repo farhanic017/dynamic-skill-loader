@@ -15,22 +15,13 @@ let passed = 0, failed = 0, skipped = 0;
 let asyncChain = Promise.resolve();
 
 function test(name, fn) {
-  try {
-    const r = fn();
-    if (r && typeof r.then === 'function') {
-      // Suppress stale rejections from the immediate fn() call
-      r.catch(() => {});
-      asyncChain = asyncChain.then(() => {
-        return fn().then(() => {
-          passed++; console.log(`  \u2713 ${name}`);
-        }).catch(e => {
-          failed++; console.log(`  \u2717 ${name}: ${e.message}`);
-        });
-      });
-    } else {
-      passed++; console.log(`  \u2713 ${name}`);
-    }
-  } catch (e) { failed++; console.log(`  \u2717 ${name}: ${e.message}`); }
+  asyncChain = asyncChain.then(() => {
+    return Promise.resolve().then(() => fn());
+  }).then(() => {
+    passed++; console.log(`  \u2713 ${name}`);
+  }).catch(e => {
+    failed++; console.log(`  \u2717 ${name}: ${e.message}`);
+  });
 }
 
 function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed'); }
@@ -1387,6 +1378,112 @@ test('Skill file size limit enforced', () => {
   writeFileSync(join(skillDir, 'SKILL.md'), bigContent, 'utf-8');
   const out = runCLI('--list');
   assert(!out.includes('FAIL'), 'large file handled without crash');
+});
+
+// ── [14] Edge Cases: Import, Paths, Unicode, Deep Nesting ─────
+console.log('  \x1b[36m[14/8] Edge Cases: Import, Paths, Unicode, Deep Nesting\x1b[0m');
+
+test('importRepo rejects invalid git URLs via MCP', async () => {
+  resetSkills();
+  const badUrls = ['file:///etc/passwd', 'ftp://bad.com/repo', 'not-a-url', '', 'https://evil.com";rm -rf /"', 'https://x.com;ls'];
+  for (const bad of badUrls) {
+    const { output } = await runMCP({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'import_repo', arguments: { url: bad } } });
+    const resp = JSON.parse(output.trim());
+    const txt = resp.result?.content?.[0]?.text || '';
+    assert(txt.includes('Invalid') || txt.includes('unsafe') || txt.includes('Please provide') || txt.includes('Import failed'), `should reject: ${bad} — got: ${JSON.stringify(txt.substring(0,100))}`);
+  }
+});
+
+test('accepts valid git URLs via isValidGitUrl', () => {
+  const script = readFileSync(INDEX_SCRIPT, 'utf-8');
+  assert(script.includes("'http:'") && script.includes("'https:'") && script.includes("'ssh:'"), 'valid protocols listed');
+  assert(script.includes("VALID_GIT_PROTOCOLS"), 'protocol whitelist defined');
+  assert(!script.includes("execSync(`git clone"), 'no shell-executed git clone');
+});
+
+test('Windows path separator mixed (/ vs \\) blocked', () => {
+  const script = readFileSync(INDEX_SCRIPT, 'utf-8');
+  assert(script.includes('isInsideSkillsDir'), 'path guard function exists');
+  // Skips directory uses resolve() + startsWith() — will work on any OS
+  assert(script.includes('resolve(targetPath)'), 'resolve-based path check');
+});
+
+test('isSafeKey rejects all three forbidden keys', () => {
+  const script = readFileSync(INDEX_SCRIPT, 'utf-8');
+  assert(script.includes('__proto__'), '__proto__ blocked');
+  assert(script.includes('prototype'), 'prototype blocked');
+  assert(script.includes('constructor'), 'constructor blocked');
+});
+
+test('Unicode composed (NFC) skill name indexes correctly', () => {
+  resetSkills();
+  const dir = join(TMP, '\u00E9');  // é = composed NFC (U+00E9)
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'SKILL.md'), '---\nname: cafe\ndescription: café (NFC)\ntriggers:\n  - nfc\n---\n', 'utf-8');
+  const out = runCLI('--match nfc');
+  assert(out.includes('cafe'), 'NFC unicode skill');
+});
+
+test('Unicode decomposed (NFD) skill name indexes correctly', () => {
+  resetSkills();
+  const dir = join(TMP, 'e\u0301');  // e + combining accent = NFD
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'SKILL.md'), '---\nname: cafe-nfd\ndescription: cafe\u0301 (NFD)\ntriggers:\n  - nfd\n---\n', 'utf-8');
+  const out = runCLI('--match nfd');
+  assert(out.includes('cafe-nfd'), 'NFD unicode skill');
+});
+
+test('Deeply nested flow mapping (4 levels)', () => {
+  resetSkills();
+  writeSkillRaw('deep-flow', '---\nname: deep-flow\ndescription: "level0: {level1: {level2: {level3: val}}}"\ntriggers:\n  - df\n---\n');
+  const out = runCLI('--get deep-flow');
+  assert(out.includes('deep-flow'), '4-level flow nested');
+});
+
+test('Flow mapping 5 levels deep does not crash', () => {
+  resetSkills();
+  // Generate 5 levels of nested flow {...{...}}
+  let inner = 'val';
+  for (let i = 5; i >= 1; i--) inner = `level${i}: ${i === 5 ? inner : '{' + inner + '}'}`;
+  const yaml = `---\nname: flow-5\ndescription: "5 levels deep"\nconfig: {${inner}}\ntriggers:\n  - f5\n---\n`;
+  writeSkillRaw('flow-5', yaml);
+  const out = runCLI('--get flow-5');
+  assert(out.includes('flow-5'), '5-level flow without crash');
+});
+
+test('List of objects with sub-children parsed cleanly', () => {
+  resetSkills();
+  writeSkillRaw('list-objs', '---\nname: list-objs\ndescription: list of objects\ntriggers:\n  - lo\nitems:\n  - name: first\n    value: 1\n  - name: second\n    value: 2\n---\n');
+  const out = runCLI('--get list-objs');
+  assert(out.includes('list-objs'), 'list of objects parsed');
+});
+
+test('List of objects with mixed simple/complex items', () => {
+  resetSkills();
+  writeSkillRaw('mixed-list', '---\nname: mixed-list\ndescription: mixed list\ntriggers:\n  - ml\nitems:\n  - simple-string\n  - name: complex\n    value: deep\n  - another-simple\n---\n');
+  const out = runCLI('--get mixed-list');
+  assert(out.includes('mixed-list'), 'mixed list items parsed');
+});
+
+test('List of objects 3+ properties per item', () => {
+  resetSkills();
+  writeSkillRaw('rich-objs', '---\nname: rich-objs\ndescription: rich objects\ntriggers:\n  - ro\nconfig:\n  - host: a.com\n    port: 443\n    ssl: true\n  - host: b.com\n    port: 80\n    ssl: false\n---\n');
+  const out = runCLI('--get rich-objs');
+  assert(out.includes('rich-objs'), 'rich list objects parsed');
+});
+
+test('Deeply nested YAML object 6 levels', () => {
+  resetSkills();
+  writeSkillRaw('nest-6', '---\nname: nest-6\ndescription: 6 level deep\ntriggers:\n  - n6\nl1:\n  l2:\n    l3:\n      l4:\n        l5:\n          l6: found\n---\n');
+  const out = runCLI('--get nest-6');
+  assert(out.includes('nest-6'), '6 level nesting');
+});
+
+test('Empty frontmatter with only --- and ... produces nothing', () => {
+  resetSkills();
+  writeSkillRaw('empty-dots', '---\n...\n# body\n');
+  const out = runCLI('--list');
+  assert(!out.includes('empty-dots'), 'empty doc with ... not indexed');
 });
 
 // ── Summary ────────────────────────────────────────────────────

@@ -33,13 +33,16 @@ const VALID_GIT_PROTOCOLS = ['http:', 'https:', 'ssh:', 'git:'];
 // ── Security: Validate URL before git clone ─────────────────────
 function isValidGitUrl(url) {
   if (!url || typeof url !== 'string') return false;
-  if (url.length > 2000) return false; // sanity limit
+  if (url.length > 2000) return false;
   try {
     const parsed = new URL(url);
+    const DANGEROUS_CHARS = /[:;|$&`(){}[\]!<>]/;
     return VALID_GIT_PROTOCOLS.includes(parsed.protocol) &&
       parsed.hostname && parsed.hostname.length > 0 &&
-      !parsed.hostname.includes('..') && // no dotted traversal
-      !/[:;|$&`(){}[\]!<>]/.test(parsed.pathname); // no shell chars in path
+      !parsed.hostname.includes('..') &&
+      !parsed.password && // reject embedded credentials (user:pass@host)
+      !DANGEROUS_CHARS.test(parsed.pathname) &&
+      !DANGEROUS_CHARS.test(parsed.hostname);
   } catch { return false; }
 }
 
