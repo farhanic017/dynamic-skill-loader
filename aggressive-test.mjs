@@ -1486,6 +1486,49 @@ test('Empty frontmatter with only --- and ... produces nothing', () => {
   assert(!out.includes('empty-dots'), 'empty doc with ... not indexed');
 });
 
+// ── [15] Claude Code Skills ────────────────────────────────────
+console.log('  \x1b[36m[15/8] Claude Code Skills (.claude/skills/*.md)\x1b[0m');
+
+test('Claude Code skill .claude/skills/name.md indexed', () => {
+  resetSkills();
+  const claudeSkillsDir = join(TMP, '..', '.claude', 'skills');
+  mkdirSync(claudeSkillsDir, { recursive: true });
+  writeFileSync(join(claudeSkillsDir, 'my-claude-skill.md'), '---\nname: my-claude-skill\ndescription: Claude Code skill test\ntriggers:\n  - cc-test\n---\n', 'utf-8');
+  const out = runCLI('--match cc-test');
+  assert(out.includes('my-claude-skill'), 'Claude Code skill matched');
+  // Cleanup
+  try { rmSync(join(TMP, '..', '.claude'), { recursive: true, force: true }); } catch {}
+});
+
+test('Claude Code skill shows claude-code origin', () => {
+  resetSkills();
+  const claudeSkillsDir = join(TMP, '..', '.claude', 'skills');
+  mkdirSync(claudeSkillsDir, { recursive: true });
+  writeFileSync(join(claudeSkillsDir, 'origin-test.md'), '---\nname: origin-test\ndescription: origin check\ntriggers:\n  - ot\n---\n', 'utf-8');
+  const out = runCLI('--origin claude-code');
+  assert(out.includes('origin-test'), 'Claude Code skill filterable by origin');
+  try { rmSync(join(TMP, '..', '.claude'), { recursive: true, force: true }); } catch {}
+});
+
+test('Claude Code skill with same name as regular skill deduplicated', () => {
+  resetSkills();
+  // Regular skill
+  writeSkillRaw('dup-name', '---\nname: dup-name\ndescription: regular version\ntriggers:\n  - dup\n---\n');
+  // Claude Code skill with same name
+  const claudeSkillsDir = join(TMP, '..', '.claude', 'skills');
+  mkdirSync(claudeSkillsDir, { recursive: true });
+  writeFileSync(join(claudeSkillsDir, 'dup-name.md'), '---\nname: dup-name\ndescription: claude version\ntriggers:\n  - dup\n---\n', 'utf-8');
+  const out = runCLI('--match dup');
+  assert(out.includes('regular version'), 'regular skill wins over claude');
+  try { rmSync(join(TMP, '..', '.claude'), { recursive: true, force: true }); } catch {}
+});
+
+test('Claude agent routing includes claude format skills', () => {
+  const script = readFileSync(INDEX_SCRIPT, 'utf-8');
+  assert(script.includes("'claude'"), 'claude format in routing table');
+  assert(script.includes("'claude-code'"), 'claude-code origin string');
+});
+
 // ── Summary ────────────────────────────────────────────────────
 asyncChain.then(() => {
   const total = passed + failed + skipped;

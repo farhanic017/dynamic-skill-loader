@@ -818,6 +818,52 @@ function indexSkills() {
   if (claudeCommandsDirAlt !== claudeCommandsDir) {
     indexCommandsFromDir(claudeCommandsDirAlt, 'local');
   }
+  // Also index Claude Code skills from .claude/skills/ (flat *.md files with YAML frontmatter)
+  const claudeSkillsDirs = [
+    join(SKILLS_DIR, '..', '.claude', 'skills'),
+    join(dirname(SKILLS_DIR), '.claude', 'skills'),
+  ];
+  const claudeSeen = new Set();
+  for (const csDir of claudeSkillsDirs) {
+    if (existsSync(csDir)) {
+      const entries = readdirSync(csDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith('.md')) {
+          const fp = join(csDir, entry.name);
+          try {
+            const content = readFileSync(fp, 'utf-8');
+            if (content.length <= MAX_SKILL_FILE_SIZE) {
+              const meta = parseSkillMd(content);
+              if (meta && meta.name && !claudeSeen.has(meta.name)) {
+                claudeSeen.add(meta.name);
+                const skillName = meta.name || entry.name.replace(/\.md$/i, '');
+                const skill = {
+                  id: skillName,
+                  dir: csDir,
+                  name: skillName,
+                  description: meta.description || '',
+                  triggers: Array.isArray(meta.triggers) ? meta.triggers.slice(0, MAX_TRIGGERS) : [],
+                  fullContent: content,
+                  origin: 'claude-code',
+                  domain: 'claude',
+                  format: 'claude',
+                  isCommand: false,
+                  commandBody: '',
+                };
+                if (!seenNames.has(skill.name)) {
+                  seenNames.add(skill.name);
+                  skills.push(skill);
+                  console.error(`[skill-dispatcher] Indexed Claude Code skill: ${skill.name}`);
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`[skill-dispatcher] Error reading Claude Code skill ${fp}: ${err.message}`);
+          }
+        }
+      }
+    }
+  }
   console.error(`[skill-dispatcher] Loaded ${skills.length} skills from ${SKILLS_DIR}${commandRegistry.size > 0 ? ` (${commandRegistry.size} commands)` : ''}`);
 }
 
@@ -828,8 +874,8 @@ indexSkills();
 // Skills tagged with these categories are visible to the agent.
 
 const AGENT_ROUTING = {
-  opencode: { match: ['standard', 'plain', 'gemini', 'command'], desc: 'Default OpenCode agent' },
-  claude: { match: ['standard', 'command', 'gemini', 'plain'], desc: 'Claude Code / Claude Desktop' },
+  opencode: { match: ['standard', 'plain', 'gemini', 'command', 'claude'], desc: 'Default OpenCode agent' },
+  claude: { match: ['standard', 'command', 'gemini', 'plain', 'claude'], desc: 'Claude Code / Claude Desktop' },
   cursor: { match: ['standard', 'plain'], desc: 'Cursor editor' },
   aider: { match: ['standard', 'plain'], desc: 'Aider CLI' },
   windsurf: { match: ['standard', 'plain', 'gemini'], desc: 'Windsurf editor' },

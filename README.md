@@ -1,13 +1,13 @@
 [![License](https://img.shields.io/badge/license-GPLv3-purple)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Node.js%2018%2B-green)]()
 [![Author](https://img.shields.io/badge/author-Farhan%20Dhrubo-red)](https://github.com/farhanic017)
-[![Tests](https://img.shields.io/badge/tests-162%20passed-brightgreen)](aggressive-test.mjs)
+[![Tests](https://img.shields.io/badge/tests-166%20passed-brightgreen)](aggressive-test.mjs)
 
 # Dynamic Skill Loader v3.0 — Universal Skill Dispatcher with Multi-Format Parsing, Agent Routing & External Repo Import
 
 > Created by [Farhan Dhrubo](https://github.com/farhanic017) — [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader-for/issues)
 
-An MCP server and CLI that loads skills **on-demand** from any source, in any format, for any AI coding agent. Supports **4 skill formats**, **14 AI agents**, **nested multi-domain skills**, **external GitHub repo import**, and **intelligent lifecycle management** — zero-config.
+An MCP server and CLI that loads skills **on-demand** from any source, in any format, for any AI coding agent. Supports **5 skill formats**, **14 AI agents**, **nested multi-domain skills**, **external GitHub repo import**, and **intelligent lifecycle management** — zero-config.
 
 ---
 
@@ -44,7 +44,7 @@ npx skill-dispatcher --skills-dir ./skills
 
 | Feature | What it does |
 |---------|-------------|
-| **4 skill formats** | Standard YAML, plain markdown, Gemini-style, command format |
+| **5 skill formats** | Standard YAML, plain markdown, Gemini-style, command format, Claude Code skills |
 | **14 AI agent routing** | Skills auto-filtered per agent (OpenCode, Claude, Cursor, Windsurf, Aider, Gemini, Codex, Antigravity, Kilo Code, Augment, Hermes, Mistral Vibe, OpenClaw) |
 | **External repo import** | `--import-repo <url>` clones & indexes any GitHub repo's skills |
 | **Nested directory scanning** | Reads skills from `<domain>/<subdomain>/skills/<name>/SKILL.md` up to 4 levels deep |
@@ -117,14 +117,26 @@ description: "Deploy the current branch to staging"
 3. Deploy: `npm run deploy:staging`
 ```
 
+### 5. Claude Code skill format (`.claude/skills/*.md`)
+```markdown
+---
+name: my-claude-skill
+description: A Claude Code skill with standard frontmatter
+triggers:
+  - cc-task
+---
+# Skill instructions here
+```
+Claude Code skills are placed in `.claude/skills/` and use the same YAML frontmatter as standard skills. They are auto-discovered by `indexSkills()` and tagged with `origin: 'claude-code'` and `format: 'claude'`.
+
 ## Agent Routing
 
 Each of the 14 supported agents sees only compatible skill formats:
 
 | Agent | Formats |
 |-------|---------|
-| **OpenCode** | standard, plain, gemini, command |
-| **Claude Code / Desktop** | standard, command, gemini, plain |
+| **OpenCode** | standard, plain, gemini, command, claude |
+| **Claude Code / Desktop** | standard, command, gemini, plain, claude |
 | **Cursor** | standard, plain |
 | **Windsurf** | standard, plain, gemini |
 | **Codex** | standard, command, plain |
