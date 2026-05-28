@@ -1,7 +1,7 @@
 [![License](https://img.shields.io/badge/license-GPLv3-purple)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Node.js%2018%2B-green)]()
 [![Author](https://img.shields.io/badge/author-Farhan%20Dhrubo-red)](https://github.com/farhanic017)
-[![Tests](https://img.shields.io/badge/tests-127%20passed-brightgreen)](aggressive-test.mjs)
+[![Tests](https://img.shields.io/badge/tests-149%20passed-brightgreen)](aggressive-test.mjs)
 
 # Dynamic Skill Loader v3.0 — Universal Skill Dispatcher with Multi-Format Parsing, Agent Routing & External Repo Import
 
@@ -29,9 +29,10 @@ https://github.com/farhanic017/dynamic-skill-loader-for-opencode
 | **Nested directory scanning** | Reads skills from `<domain>/<subdomain>/skills/<name>/SKILL.md` up to 4 levels deep |
 | **Custom command registry** | `.claude/commands/*.md` parsed as runnable commands |
 | **Cross-repo origin tracking** | Every skill tagged with its origin repo, filterable via `--origin` |
-| **Universal YAML parser** | Handles inline arrays, anchors, aliases, quoted keys, unicode, multi-doc, tab indentation |
+| **Universal YAML parser** | Handles inline arrays, anchors, aliases, quoted keys, unicode, multi-doc, tab indentation, folded `>`, typed nulls, flow mappings, escape sequences, booleans, numerics |
 | **Tags fallback** | Skills with `tags:` (no `triggers:`) matched automatically |
-| **127 tests, 0 failures** | Full MCP protocol stress, encoding, boundary, and YAML syntax coverage |
+| **Security hardened** | Shell injection prevention, path traversal guards, prototype pollution rejection, input size limits, MCP message validation |
+| **149 tests, 0 failures** | Full MCP protocol stress, encoding, boundary, YAML syntax, expanded YAML, and security coverage |
 
 ## 11 MCP Tools
 
@@ -176,20 +177,40 @@ skill-dispatcher --unload gsap-core
 
 ## YAML Features
 
-The parser handles all common YAML patterns found in skill definitions:
+The parser handles all common and advanced YAML patterns found in skill definitions:
 
 | Feature | Example |
 |---------|---------|
 | Inline arrays | `triggers: [foo, bar]` |
-| Multi-line (\|) | `description: \|` block |
+| Multi-line literal (\|) | `description: \|` block (newlines preserved) |
+| Folded block (>) | `description: >` block (lines joined with spaces) |
+| Typed nulls | `value: ~`, `value: null`, `value: Null`, `value: NULL` |
+| Flow mappings | `config: {a: 1, b: 2}` inline objects |
+| Escape sequences | `"line1\\nline2\\ttabbed"` in double-quoted strings |
+| Boolean literals | `yes`, `no`, `on`, `off`, `true`, `false` |
+| Numeric formats | `0xFF` hex, `1_000_000` separators, `1e3` scientific, `+42`, `.5` |
 | Anchors | `defaults: &defaults` with `<<: *defaults` |
-| Quoted keys | `"my key": value` |
+| Quoted keys | `"my key": value` (preserves spaces) |
 | Dots in keys | `some.key: value` |
 | Unicode keys | `ключ: значение` |
-| Multi-doc | `---\ndoc1\n---\ndoc2\n---` |
+| Multi-doc | `---\ndoc1\n---\doc2\n---` (first doc only) |
 | End marker | `...` stops parsing |
 | Tab indentation | Nested items with tabs |
 | Inline comments | `#` lines ignored |
+| Prototype pollution guard | Keys `__proto__`, `prototype`, `constructor` rejected |
+| Max nesting limit | 20 levels max before truncation |
+
+## Security
+
+| Protection | Implementation |
+|------------|---------------|
+| Shell injection | `spawnSync` (no shell) for all child processes; `execSync` eliminated |
+| Git URL validation | Only http/https/ssh/git protocols; rejects shell chars (`;`, `` ` ``, `$()`, `\`) |
+| Path traversal | `resolve()` + `startsWith()` ensures all reads stay within `SKILLS_DIR` |
+| Prototype pollution | `__proto__`, `prototype`, `constructor` keys rejected in all YAML input |
+| Input size limits | Max YAML value 100K chars, max nesting 20 levels, max 500 triggers, 5000 list items, 500 keys/object |
+| MCP validation | Message structure enforced (jsonrpc 2.0, valid types), 10MB max message size, 10MB max skill file |
+| Stderr sanitization | Auth tokens stripped from git error output |
 
 ## Project Structure
 
@@ -198,7 +219,7 @@ skill-dispatcher/
 ├── index.mjs             # MCP server & CLI (v3.0 universal dispatcher)
 ├── ALWAYS_ON.md          # Permanent lifecycle instructions
 ├── SKILL.md              # self-defining skill
-├── aggressive-test.mjs   # 127-test suite (MCP, encoding, YAML syntax)
+├── aggressive-test.mjs   # 149-test suite (MCP, encoding, YAML, security)
 ├── README.md
 ├── LICENSE               # GPL-3.0
 ├── NOTICE
@@ -217,4 +238,4 @@ See [LICENSE](./LICENSE) and [NOTICE](./NOTICE) for full details.
 
 ---
 
-*Built with Node.js, MCP, and 127 tests that never lie.*
+*Built with Node.js, MCP, and 149 tests that never lie.*

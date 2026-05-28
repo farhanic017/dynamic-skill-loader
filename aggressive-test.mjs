@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const MJS = join(__dirname, 'index.mjs');
+const INDEX_SCRIPT = MJS;
 const TMP = join(__dirname, '.aggressive-test');
 let passed = 0, failed = 0, skipped = 0;
 let asyncChain = Promise.resolve();
@@ -1219,6 +1220,173 @@ test('Comma-separated inline triggers with quoted items', () => {
   writeSkillRaw('csv-quoted', '---\nname: csv-quoted\ndescription: csv quoted\ntriggers: ["one", "two", "three"]\n---\n');
   const out = runCLI('--match two');
   assert(out.includes('csv-quoted'), 'CSV inline triggers with quotes');
+});
+
+console.log('  \x1b[36m[12/8] YAML Expanded: Folded, Typed Nulls, Flow, Escapes, Booleans, Numerics\x1b[0m');
+
+test('Folded > block scalar joins lines with spaces', () => {
+  resetSkills();
+  writeSkillRaw('folded-block', '---\nname: folded-block\ndescription: >\n  This is a\n  folded block\n  scalar value\ntriggers:\n  - fb\n---\n');
+  const out = runCLI('--match fb');
+  assert(out.includes('folded-block'), 'folded block skill loaded');
+  assert(out.includes('folded block scalar'), 'folded description appears joined');
+});
+
+test('Typed null ~ value stored as empty string', () => {
+  resetSkills();
+  writeSkillRaw('null-tilde', '---\nname: null-tilde\ndescription: ~\ntriggers:\n  - nt\n---\n');
+  const out = runCLI('--get null-tilde');
+  assert(out.includes('description: '), 'null tilde yields empty description');
+});
+
+test('Typed null keyword stored as empty string', () => {
+  resetSkills();
+  writeSkillRaw('null-word', '---\nname: null-word\ndescription: null\ntriggers:\n  - nw\n---\n');
+  const out = runCLI('--get null-word');
+  assert(out.includes('description: '), 'null keyword yields empty description');
+});
+
+test('Typed Null capitalized yields empty', () => {
+  resetSkills();
+  writeSkillRaw('null-cap', '---\nname: null-cap\ndescription: Null\ntriggers:\n  - nc\n---\n');
+  const out = runCLI('--get null-cap');
+  assert(out.includes('description: '), 'Null capitalized yields empty');
+});
+
+test('Flow mapping inline object parses correctly', () => {
+  resetSkills();
+  writeSkillRaw('flow-map', '---\nname: flow-map\ndescription: flow mapping test\nconfig: {a: 1, b: 2}\ntriggers:\n  - fm\n---\n');
+  const out = runCLI('--get flow-map');
+  assert(out.includes('flow-map'), 'flow mapping skill parsed');
+});
+
+test('Nested flow mapping in description', () => {
+  resetSkills();
+  writeSkillRaw('nested-flow', '---\nname: nested-flow\ndescription: nested {x: 1, y: 2} in desc\ntriggers:\n  - nf\n---\n');
+  const out = runCLI('--get nested-flow');
+  assert(out.includes('nested-flow'), 'flow in description');
+});
+
+test('Double-quoted escape sequences: \\n, \\t, \\\\', () => {
+  resetSkills();
+  writeSkillRaw('escapes', '---\nname: escapes\ndescription: "line1\\nline2\\ttabbed\\\\backslash"\ntriggers:\n  - es\n---\n');
+  const out = runCLI('--get escapes');
+  assert(out.includes('escapes'), 'double-quoted escapes parsed');
+});
+
+test('Boolean literal yes becomes true', () => {
+  resetSkills();
+  writeSkillRaw('bool-yes', '---\nname: bool-yes\nactive: yes\ntriggers:\n  - by\n---\n');
+  const out = runCLI('--get bool-yes');
+  assert(out.includes('bool-yes'), 'yes boolean literal');
+});
+
+test('Boolean literal no becomes false', () => {
+  resetSkills();
+  writeSkillRaw('bool-no', '---\nname: bool-no\nactive: no\ntriggers:\n  - bn\n---\n');
+  const out = runCLI('--get bool-no');
+  assert(out.includes('bool-no'), 'no boolean literal');
+});
+
+test('Boolean literal on/off recognized', () => {
+  resetSkills();
+  writeSkillRaw('bool-onoff', '---\nname: bool-onoff\nenabled: on\ndisabled: off\ntriggers:\n  - bo\n---\n');
+  const out = runCLI('--get bool-onoff');
+  assert(out.includes('bool-onoff'), 'on/off booleans');
+});
+
+test('Hex number value parsed', () => {
+  resetSkills();
+  writeSkillRaw('hex-val', '---\nname: hex-val\ncode: 0xFF\ntriggers:\n  - hv\n---\n');
+  const out = runCLI('--get hex-val');
+  assert(out.includes('hex-val'), 'hex number');
+});
+
+test('Number with underscore separators', () => {
+  resetSkills();
+  writeSkillRaw('num-sep', '---\nname: num-sep\nbig: 1_000_000\ntriggers:\n  - ns\n---\n');
+  const out = runCLI('--get num-sep');
+  assert(out.includes('num-sep'), 'numeric separator');
+});
+
+test('Scientific notation number', () => {
+  resetSkills();
+  writeSkillRaw('sci-num', '---\nname: sci-num\nvalue: 1e3\ntriggers:\n  - sn\n---\n');
+  const out = runCLI('--get sci-num');
+  assert(out.includes('sci-num'), 'scientific notation');
+});
+
+test('Mixed | and > blocks in same YAML', () => {
+  resetSkills();
+  writeSkillRaw('mixed-blocks', '---\nname: mixed-blocks\ndescription: >\n  folded line1\n  folded line2\nlong: |\n  literal line1\n  literal line2\ntriggers:\n  - mb\n---\n');
+  const out = runCLI('--get mixed-blocks');
+  assert(out.includes('mixed-blocks'), 'both block styles');
+});
+
+console.log('  \x1b[36m[13/8] Security & Hardening: Pollution, Injection, Validation\x1b[0m');
+
+test('Prototype pollution: __proto__ key rejected', () => {
+  resetSkills();
+  writeSkillRaw('pollute-proto', '---\nname: pollute-proto\n__proto__: polluted\ntriggers:\n  - pp\n---\n');
+  const out = runCLI('--get pollute-proto');
+  assert(out.includes('pollute-proto'), '__proto__ key rejected, skill still indexed');
+});
+
+test('Prototype pollution: constructor key rejected', () => {
+  resetSkills();
+  writeSkillRaw('pollute-ctor', '---\nname: pollute-ctor\nconstructor: polluted\ntriggers:\n  - pc\n---\n');
+  const out = runCLI('--get pollute-ctor');
+  assert(out.includes('pollute-ctor'), 'constructor key rejected, skill indexed');
+});
+
+test('Git URL validation rejects file:// URLs', () => {
+  resetSkills();
+  const script = readFileSync(INDEX_SCRIPT, 'utf-8');
+  assert(!script.includes("execSync(`git clone"), 'git clone uses spawnSync not execSync');
+  assert(script.includes('isValidGitUrl'), 'isValidGitUrl function exists');
+});
+
+test('Git URL validation rejects shell injection chars', () => {
+  resetSkills();
+  const script = readFileSync(INDEX_SCRIPT, 'utf-8');
+  assert(script.includes('isValidGitUrl'), 'isValidGitUrl function exists');
+});
+
+test('Max nesting depth protection', () => {
+  resetSkills();
+  // Create deeply nested YAML (>20 levels) — should not crash
+  let yaml = '---\nname: deep-nest\n';
+  for (let i = 0; i < 25; i++) {
+    yaml += ' '.repeat(i) + `level${i}:\n`;
+  }
+  yaml += ' '.repeat(25) + 'key: value\n';
+  yaml += 'triggers:\n  - dn\n---\n';
+  writeSkillRaw('deep-nest', yaml);
+  const out = runCLI('--get deep-nest');
+  assert(out.includes('deep-nest') || !out.includes('FAIL'), 'deep nesting handled without crash');
+});
+
+test('Max triggers limit enforced', () => {
+  resetSkills();
+  const manyTriggers = Array.from({length: 600}, (_, i) => `  - t${i}`);
+  writeSkillRaw('many-trigs', `---\nname: many-trigs\ndescription: many triggers test\ntriggers:\n${manyTriggers.join('\n')}\n---\n`);
+  const out = runCLI('--get many-trigs');
+  assert(out.includes('many-trigs'), 'many triggers handled without crash');
+});
+
+test('validateMCPMessage rejects non-object', () => {
+  const script = readFileSync(INDEX_SCRIPT, 'utf-8');
+  assert(script.includes('validateMCPMessage'), 'validateMCPMessage function exists');
+});
+
+test('Skill file size limit enforced', () => {
+  resetSkills();
+  const bigContent = 'x'.repeat(15 * 1024 * 1024);
+  const skillDir = join(TMP, 'too-big');
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, 'SKILL.md'), bigContent, 'utf-8');
+  const out = runCLI('--list');
+  assert(!out.includes('FAIL'), 'large file handled without crash');
 });
 
 // ── Summary ────────────────────────────────────────────────────

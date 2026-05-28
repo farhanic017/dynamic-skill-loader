@@ -17,10 +17,56 @@
 
 // ── All internal logging goes to stderr (never stdout) to protect MCP's JSON-RPC stream ──
 
-import { readFileSync, readdirSync, existsSync, rmSync, mkdirSync, writeFileSync } from 'fs';
-import { join, resolve, basename, dirname } from 'path';
-import { spawn, execSync } from 'child_process';
+import { readFileSync, readdirSync, existsSync, rmSync, mkdirSync, writeFileSync, realpathSync } from 'fs';
+import { join, resolve, basename, dirname, relative } from 'path';
+import { spawn, spawnSync } from 'child_process';
 import { createInterface } from 'readline';
+
+// ── Security Constants ────────────────────────────────────────────
+const MAX_VALUE_LENGTH = 100000;     // max chars for any single YAML value
+const MAX_YAML_NESTING = 20;          // max recursion depth in YAML parser
+const MAX_SKILL_FILE_SIZE = 10 * 1024 * 1024; // 10MB max skill file
+const MAX_COMMAND_SIZE = 10 * 1024 * 1024; // 10MB max command body
+const MAX_TRIGGERS = 500;            // max triggers per skill
+const VALID_GIT_PROTOCOLS = ['http:', 'https:', 'ssh:', 'git:'];
+
+// ── Security: Validate URL before git clone ─────────────────────
+function isValidGitUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  if (url.length > 2000) return false; // sanity limit
+  try {
+    const parsed = new URL(url);
+    return VALID_GIT_PROTOCOLS.includes(parsed.protocol) &&
+      parsed.hostname && parsed.hostname.length > 0 &&
+      !parsed.hostname.includes('..') && // no dotted traversal
+      !/[:;|$&`(){}[\]!<>]/.test(parsed.pathname); // no shell chars in path
+  } catch { return false; }
+}
+
+// ── Security: Prevent path traversal ─────────────────────────────
+function isInsideSkillsDir(targetPath) {
+  try {
+    const resolved = resolve(targetPath);
+    const base = resolve(SKILLS_DIR);
+    return resolved.startsWith(base + '\\') || resolved.startsWith(base + '/') || resolved === base;
+  } catch { return false; }
+}
+
+// ── Security: Prevent prototype pollution ───────────────────────
+const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+function isSafeKey(key) {
+  return typeof key === 'string' && !FORBIDDEN_KEYS.has(key.trim()) && !FORBIDDEN_KEYS.has(key.trim().toLowerCase());
+}
+
+// ── Security: MCP message validation ────────────────────────────
+function validateMCPMessage(msg) {
+  if (!msg || typeof msg !== 'object') return false;
+  if (typeof msg.jsonrpc !== 'string' || msg.jsonrpc !== '2.0') return false;
+  if (msg.id !== undefined && msg.id !== null && typeof msg.id !== 'number' && typeof msg.id !== 'string') return false;
+  if (msg.method !== undefined && typeof msg.method !== 'string') return false;
+  if (msg.params !== undefined && msg.params !== null && typeof msg.params !== 'object') return false;
+  return true;
+}
 
 const args = process.argv.slice(2);
 let SKILLS_DIR = './skills';
@@ -212,47 +258,178 @@ function expandSynonyms(tokens) {
 // Supports: key: value, key: | (literal blocks), lists, nested objects,
 // arrays of objects, any depth. Robust against Windows/macOS line endings.
 
-function parseYaml(lines, startIdx, baseIndent) {
+// ── YAML Value Processing Utilities ──────────────────────────────
+
+function processYamlEscapeSequence(str) {
+  // Process standard YAML escape sequences in double-quoted strings
+  return str
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\r/g, '\r')
+    .replace(/\\\\/g, '\\')
+    .replace(/\\"/g, '"')
+    .replace(/\\0/g, '\0')
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+function interpretYamlTypedValue(val) {
+  if (val === '' || val === undefined || val === null) return '';
+  const lower = val.toLowerCase();
+  // Typed nulls
+  if (val === '~' || lower === 'null') return '';
+  // Booleans
+  if (lower === 'true' || lower === 'yes' || lower === 'on') return true;
+  if (lower === 'false' || lower === 'no' || lower === 'off') return false;
+  // Hex numbers
+  if (/^0x[0-9a-fA-F]+$/.test(val)) return parseInt(val, 16);
+  // Numeric separators
+  if (/^[+-]?\d{1,3}(_\d{3})+(\.\d+)?$/.test(val)) return parseFloat(val.replace(/_/g, ''));
+  // Decimal / float / scientific
+  if (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(val)) return parseFloat(val);
+  return val;
+}
+
+function parseYamlValue(value, lines, i, indent, maxDepth) {
+  if (maxDepth === undefined) maxDepth = MAX_YAML_NESTING;
+  if (maxDepth <= 0) return value;
+
+  // Folded block: value === '>'
+  if (value === '>') {
+    const parts = [];
+    i++;
+    while (i < lines.length && lines[i].length - lines[i].trimStart().length > indent) {
+      const chunk = lines[i].replace(new RegExp(`^\\s{${indent + 2},}`), '');
+      parts.push(chunk);
+      i++;
+    }
+    return { val: parts.join(' ').replace(/  +/g, ' ').trim(), idx: i - 1 };
+  }
+
+  // Literal block: value === '|'
+  if (value === '|') {
+    const parts = [];
+    i++;
+    while (i < lines.length && lines[i].length - lines[i].trimStart().length > indent) {
+      parts.push(lines[i].replace(new RegExp(`^\\s{${indent + 2},}`), ''));
+      i++;
+    }
+    return { val: parts.join('\n').trim(), idx: i - 1 };
+  }
+
+  // Flow mapping: key: {a: 1, b: 2}
+  if (value.startsWith('{') && value.endsWith('}')) {
+    const inner = value.slice(1, -1);
+    const obj = {};
+    let depth = 0;
+    let current = '';
+    let keyDone = false;
+    let curKey = '';
+    for (const ch of inner) {
+      if ((ch === ',' || ch === ';') && depth === 0) {
+        if (curKey) {
+          const kv = parseYamlInlineValue(current.trim(), maxDepth - 1);
+          const safeKey = curKey.trim();
+          if (isSafeKey(safeKey)) obj[safeKey] = kv;
+        }
+        current = '';
+        keyDone = false;
+        curKey = '';
+      } else if (ch === ':' && depth === 0 && !keyDone) {
+        curKey = current.trim();
+        current = '';
+        keyDone = true;
+      } else if (ch === '{' || ch === '[') { depth++; current += ch; }
+      else if (ch === '}' || ch === ']') { depth--; current += ch; }
+      else { current += ch; }
+    }
+    if (curKey) {
+      const kv = parseYamlInlineValue(current.trim(), maxDepth - 1);
+      const safeKey = curKey.trim();
+      if (isSafeKey(safeKey)) obj[safeKey] = kv;
+    }
+    return { val: obj, idx: i };
+  }
+
+  // Inline array: key: [item1, item2, ...]
+  if (value.startsWith('[') && value.endsWith(']')) {
+    const items = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of value.slice(1, -1)) {
+      if (ch === ',' && depth === 0) {
+        items.push(parseYamlInlineValue(current.trim(), maxDepth - 1));
+        current = '';
+      } else if (ch === '[' || ch === '{') { depth++; current += ch; }
+      else if (ch === ']' || ch === '}') { depth--; current += ch; }
+      else { current += ch; }
+    }
+    if (current) items.push(parseYamlInlineValue(current.trim(), maxDepth - 1));
+    return { val: items, idx: i };
+  }
+
+  return null; // not a block/inline value
+}
+
+function parseYamlInlineValue(val, maxDepth) {
+  if (!val) return '';
+  if (val.length > MAX_VALUE_LENGTH) return val.slice(0, MAX_VALUE_LENGTH);
+  const dq = val.startsWith('"') && val.endsWith('"');
+  const sq = val.startsWith("'") && val.endsWith("'");
+  if (dq) return interpretYamlTypedValue(processYamlEscapeSequence(val.slice(1, -1)));
+  if (sq) return val.slice(1, -1);
+  // Check for nested flow structures
+  if (val.startsWith('{') && val.endsWith('}')) {
+    return parseYamlValue(val, [], 0, 0, maxDepth - 1)?.val || val;
+  }
+  if (val.startsWith('[') && val.endsWith(']')) {
+    return parseYamlValue(val, [], 0, 0, maxDepth - 1)?.val || val;
+  }
+  return interpretYamlTypedValue(val);
+}
+
+// ── Recursive YAML Parser ────────────────────────────────────────
+
+function parseYaml(lines, startIdx, baseIndent, maxDepth) {
+  if (maxDepth === undefined) maxDepth = MAX_YAML_NESTING;
+  if (maxDepth <= 0) return {};
   const result = {};
   let i = startIdx;
   while (i < lines.length) {
     const line = lines[i];
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) { i++; continue; }
-    // Stop if we reach a line with less indentation than base
     const indent = line.length - line.trimStart().length;
     if (baseIndent !== undefined && indent < baseIndent) break;
-    // Stop at document delimiters
     if (trimmed === '---' || trimmed === '...') { i++; break; }
 
-    // Find the first colon to split key:value, handling all key types:
-    //   key: value, <<: *ref, "quoted key": val, 'key': val, some.key: val, ключ: знач
     const colonIdx = trimmed.indexOf(':');
     if (colonIdx === -1) { i++; continue; }
     let rawKey = trimmed.slice(0, colonIdx);
     let value = trimmed.slice(colonIdx + 1).trimStart();
-    // Unquote key if quoted
     if ((rawKey.startsWith('"') && rawKey.endsWith('"')) || (rawKey.startsWith("'") && rawKey.endsWith("'"))) {
       rawKey = rawKey.slice(1, -1);
     }
     const key = rawKey.replace(/\s+/g, ' ').trim();
     if (!key) { i++; continue; }
 
-    // Detect YAML anchor (&name) in value and strip it
+    // Security: prototype pollution prevention
+    if (!isSafeKey(key)) { i++; continue; }
+
     const anchorMatch = value.match(/^&([^\s]+)/);
     if (anchorMatch) {
       value = value.slice(anchorMatch[0].length).trimStart();
     }
 
-    if (value === '|') {
-      // Literal block (description: |)
-      const parts = [];
-      i++;
-      while (i < lines.length && lines[i].length - lines[i].trimStart().length > indent) {
-        parts.push(lines[i].replace(new RegExp(`^\\s{${indent + 2},}`), ''));
-        i++;
+    // Try block value and inline parsing
+    const blockResult = parseYamlValue(value, lines, i, indent, maxDepth - 1);
+    if (blockResult) {
+      // Security: value length check
+      if (typeof blockResult.val === 'string' && blockResult.val.length > MAX_VALUE_LENGTH) {
+        result[key] = blockResult.val.slice(0, MAX_VALUE_LENGTH);
+      } else {
+        result[key] = blockResult.val;
       }
-      result[key] = parts.join('\n').trim();
+      i = blockResult.idx + 1;
       continue;
     }
 
@@ -263,11 +440,9 @@ function parseYaml(lines, startIdx, baseIndent) {
         const nextLine = lines[nextIdx];
         const nextTrimmed = nextLine.trim();
         const nextIndent = nextLine.length - nextLine.trimStart().length;
-
         if (nextIndent > indent) {
-          // Has children — nested content
           if (nextTrimmed.startsWith('- ')) {
-            // List of items (simple strings or objects)
+            // List of items
             const items = [];
             let li = nextIdx;
             while (li < lines.length) {
@@ -276,16 +451,13 @@ function parseYaml(lines, startIdx, baseIndent) {
               const cindent = cl.length - cl.trimStart().length;
               if (cindent <= indent) break;
               if (ctrimmed.startsWith('- ')) {
-                // Check if this list item has sub-children (list of objects)
                 const itemContent = ctrimmed.replace(/^- /, '').trim();
                 const nextNext = li + 1;
                 if (nextNext < lines.length) {
                   const nnLine = lines[nextNext];
                   const nnIndent = nnLine.length - nnLine.trimStart().length;
                   if (nnIndent > cindent && !nnLine.trim().startsWith('- ')) {
-                    // List item is an object with sub-keys
-                    const subResult = parseYaml(lines, li, cindent);
-                    // subResult starts at li, which has '- key: value' — parse as object
+                    const subResult = parseYaml(lines, li, cindent, maxDepth - 1);
                     const objResult = {};
                     const subColon = itemContent.indexOf(':');
                     let subKey = '';
@@ -297,32 +469,22 @@ function parseYaml(lines, startIdx, baseIndent) {
                       subKey = rk.trim();
                       subVal = itemContent.slice(subColon + 1).trimStart();
                     }
-                    if (subKey) {
+                    if (subKey && isSafeKey(subKey)) {
                       if (subVal) {
-                        const svq = (subVal.startsWith('"') && subVal.endsWith('"')) || (subVal.startsWith("'") && subVal.endsWith("'"));
-                        objResult[subKey] = svq ? subVal.slice(1, -1) : subVal.trim();
+                        objResult[subKey] = parseYamlInlineValue(subVal, maxDepth - 1);
                       } else {
-                        // Gather sub-children
-                        const childResult = parseYaml(lines, nextNext, nnIndent);
-                        Object.assign(objResult, childResult);
-                        // Skip consumed lines
-                        const keysConsumed = Object.keys(childResult).length;
-                        // We'll handle this via recursion
+                        objResult[subKey] = subResult;
                       }
                     }
                     if (Object.keys(objResult).length > 0) items.push(objResult);
                   } else {
-                    // Simple list item (string)
-                    const iq = (itemContent.startsWith('"') && itemContent.endsWith('"')) || (itemContent.startsWith("'") && itemContent.endsWith("'"));
-                    items.push(iq ? itemContent.slice(1, -1) : itemContent);
+                    items.push(parseYamlInlineValue(itemContent, maxDepth - 1));
                   }
                 } else {
-                  const iq = (itemContent.startsWith('"') && itemContent.endsWith('"')) || (itemContent.startsWith("'") && itemContent.endsWith("'"));
-                  items.push(iq ? itemContent.slice(1, -1) : itemContent);
+                  items.push(parseYamlInlineValue(itemContent, maxDepth - 1));
                 }
                 li++;
               } else if (cindent > indent) {
-                // Continuation of previous list item's sub-content — skip
                 li++;
               } else {
                 break;
@@ -332,26 +494,19 @@ function parseYaml(lines, startIdx, baseIndent) {
             i = li;
             continue;
           } else {
-            // Nested object — recurse
-            const subResult = parseYaml(lines, nextIdx, nextIndent);
+            // Nested object
+            const subResult = parseYaml(lines, nextIdx, nextIndent, maxDepth - 1);
             result[key] = subResult;
-            // Advance past consumed lines
-            const consumedKeys = Object.keys(subResult).length;
-            // Skip to after the last consumed line
             let tempIdx = nextIdx;
             let lastKeyLine = nextIdx;
-            const lastKeyName = Object.keys(subResult).pop();
             while (tempIdx < lines.length) {
               const tl = lines[tempIdx];
               const ttrimmed = tl.trim();
               const tindent = tl.length - tl.trimStart().length;
               if (tindent < nextIndent && ttrimmed) break;
-              // Check if this line defines a key (potential next sibling)
-            const tColon = ttrimmed.indexOf(':');
-            const tHasKey = tColon !== -1 && ttrimmed.slice(0, tColon).trim().length > 0;
-            if (tHasKey) {
-              const maybeKey = ttrimmed.slice(0, tColon).replace(/^["']|["']$/g, '').trim();
-                // If we've seen all keys in subResult and encounter a new key at this indentation, stop
+              const tColon = ttrimmed.indexOf(':');
+              const tHasKey = tColon !== -1 && ttrimmed.slice(0, tColon).trim().length > 0;
+              if (tHasKey) {
                 const subKeys = Object.keys(subResult);
                 const seenSoFar = new Set();
                 for (let checkIdx = nextIdx; checkIdx <= tempIdx; checkIdx++) {
@@ -378,15 +533,8 @@ function parseYaml(lines, startIdx, baseIndent) {
       continue;
     }
 
-    // Check for inline array: key: [item1, item2, ...]
-    if (value.startsWith('[') && value.endsWith(']')) {
-      result[key] = value.slice(1, -1).split(',').map(v => { const vt = v.trim(); const q = (vt.startsWith('"') && vt.endsWith('"')) || (vt.startsWith("'") && vt.endsWith("'")); return q ? vt.slice(1, -1) : vt; });
-      i++;
-      continue;
-    }
-    // Simple key: value — preserve quoted whitespace, trim unquoted
-    const vWasQuoted = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"));
-    result[key] = vWasQuoted ? value.slice(1, -1) : value.trim();
+    // Simple key: value
+    result[key] = parseYamlInlineValue(value, maxDepth - 1);
     i++;
   }
 
@@ -395,15 +543,19 @@ function parseYaml(lines, startIdx, baseIndent) {
 
 function parseFrontmatter(text) {
   if (!text) return {};
-  // Normalize line endings (handle \r\n, \r)
+  if (text.length > MAX_VALUE_LENGTH) text = text.slice(0, MAX_VALUE_LENGTH);
   const normalized = text.replace(/\r\n|\r/g, '\n');
   const lines = normalized.split('\n');
-  return parseYaml(lines, 0, 0);
+  return parseYaml(lines, 0, 0, MAX_YAML_NESTING);
 }
 
 function parseSkillMd(content) {
   if (!content) return null;
-  // Normalize line endings and strip UTF-8 BOM (common on Windows files)
+  // Security: enforce max file size
+  if (content.length > MAX_SKILL_FILE_SIZE) {
+    console.error(`[dispatcher] Skill file exceeds max size (${content.length} > ${MAX_SKILL_FILE_SIZE}), skipping`);
+    return null;
+  }
   const normalized = content.replace(/\r\n|\r/g, '\n').replace(/^\uFEFF/, '');
   const fmMatch = normalized.match(/^---\n([\s\S]*?)\n(?:---\s*)?(?:\n|$)/);
   if (!fmMatch) return null;
@@ -411,17 +563,22 @@ function parseSkillMd(content) {
   const rawTriggers = fm.triggers;
   let triggers = [];
   if (Array.isArray(rawTriggers)) {
-    triggers = rawTriggers;
+    triggers = rawTriggers.slice(0, MAX_TRIGGERS); // Security: max triggers limit
   } else if (typeof rawTriggers === 'string' && rawTriggers.trim()) {
-    triggers = rawTriggers.split(',').map(t => { const tt = t.trim(); const q = (tt.startsWith('"') && tt.endsWith('"')) || (tt.startsWith("'") && tt.endsWith("'")); return q ? tt.slice(1, -1) : tt; }).filter(t => t);
+    triggers = rawTriggers.split(',').map(t => { const tt = t.trim(); const q = (tt.startsWith('"') && tt.endsWith('"')) || (tt.startsWith("'") && tt.endsWith("'")); return q ? tt.slice(1, -1) : tt; }).filter(t => t).slice(0, MAX_TRIGGERS);
   } else if (Array.isArray(fm.tags)) {
-    triggers = fm.tags;
+    triggers = fm.tags.slice(0, MAX_TRIGGERS);
   } else if (typeof fm.tags === 'string' && fm.tags.trim()) {
-    triggers = fm.tags.split(',').map(t => { const tt = t.trim(); const q = (tt.startsWith('"') && tt.endsWith('"')) || (tt.startsWith("'") && tt.endsWith("'")); return q ? tt.slice(1, -1) : tt; }).filter(t => t);
+    triggers = fm.tags.split(',').map(t => { const tt = t.trim(); const q = (tt.startsWith('"') && tt.endsWith('"')) || (tt.startsWith("'") && tt.endsWith("'")); return q ? tt.slice(1, -1) : tt; }).filter(t => t).slice(0, MAX_TRIGGERS);
   }
+  // Security: sanitize trigger values — length and content
+  triggers = triggers.map(t => {
+    if (typeof t !== 'string') return String(t).slice(0, 200);
+    return t.slice(0, 200);
+  });
   return {
-    name: (fm.name || '').trim(),
-    description: fm.description || '',
+    name: (typeof fm.name === 'string' ? fm.name : String(fm.name || '')).trim(),
+    description: typeof fm.description === 'string' ? fm.description : String(fm.description || ''),
     triggers,
   };
 }
@@ -549,6 +706,11 @@ function parseSkillMdAdvanced(content, filePath) {
 function indexSkillFromDir(dir, origin = 'local', mdPathOverride) {
   const mdPath = mdPathOverride || skillMdPath(dir);
   if (!mdPath) return null;
+  // Security: prevent reading files outside allowed directories
+  if (!isInsideSkillsDir(resolve(mdPath))) {
+    console.error(`[dispatcher] Path traversal blocked: ${mdPath}`);
+    return null;
+  }
   try {
     const rawBuf = readFileSync(mdPath);
     const content = rawBuf.toString('utf-8');
@@ -717,20 +879,33 @@ function importRepo(url) {
     return `Repo "${repoName}" already imported. ${importedRepos.get(repoName).skills.length} skills loaded.`;
   }
 
+  // Security: validate git URL before any I/O
+  if (!isValidGitUrl(url)) {
+    return `Import failed: Invalid or unsafe git URL`;
+  }
+
   try {
     console.error(`[skill-dispatcher] Cloning ${url} → ${repoDir}...`);
     if (existsSync(repoDir)) {
-      rmSync(repoDir, { recursive: true, force: true });
+      rmSync(repoDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
     }
     mkdirSync(repoDir, { recursive: true });
-    execSync(`git clone --depth 1 --single-branch "${url}" "${repoDir}"`, {
+
+    // Security: use spawnSync instead of execSync to prevent shell injection
+    const gitResult = spawnSync('git', ['clone', '--depth', '1', '--single-branch', url, repoDir], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 60000,
-      encoding: 'utf-8',
+      timeout: 120000,
+      maxBuffer: 50 * 1024 * 1024
     });
+
+    if (gitResult.status !== 0) {
+      const stderr = gitResult.stderr?.toString() || '';
+      const sanitized = stderr.replace(/(https?:\/\/)[^@]+@/g, '$1***@'); // strip embedded tokens
+      throw new Error(`git clone failed (exit ${gitResult.status}): ${sanitized.slice(0, 500)}`);
+    }
+
     console.error(`[skill-dispatcher] Clone complete. Indexing skills...`);
 
-    // Index all SKILL.md found in the repo
     const skillDirs = findSkillDirs(repoDir, 6);
     const repoSkills = [];
     const seenNames = new Set();
@@ -745,7 +920,6 @@ function importRepo(url) {
       }
     }
 
-    // Index commands from .claude/commands/
     const commandsDir = join(repoDir, '.claude', 'commands');
     indexCommandsFromDir(commandsDir, repoName);
 
@@ -754,8 +928,7 @@ function importRepo(url) {
     return `Imported ${repoSkills.length} skills from "${repoName}". Total skills: ${skills.length}. Commands: ${commandRegistry.size}`;
   } catch (err) {
     console.error(`[skill-dispatcher] Import failed for ${url}: ${err.message}`);
-    // Cleanup failed clone
-    try { rmSync(repoDir, { recursive: true, force: true }); } catch {}
+    try { rmSync(repoDir, { recursive: true, force: true, maxRetries: 3 }); } catch {}
     return `Import failed: ${err.message}`;
   }
 }
@@ -1334,9 +1507,19 @@ function respondError(id, code, message) {
 rl.on('line', (line) => {
   line = line.trim();
   if (!line) return;
+  // Security: enforce max input size
+  if (line.length > MAX_COMMAND_SIZE) {
+    console.error(`[skill-dispatcher] Message exceeds max size (${line.length}), ignored`);
+    return;
+  }
   let msg;
   try { msg = JSON.parse(line); } catch {
     console.error(`[skill-dispatcher] Malformed JSON-RPC message ignored`);
+    return;
+  }
+  // Security: validate MCP message structure
+  if (!validateMCPMessage(msg)) {
+    console.error(`[skill-dispatcher] Invalid JSON-RPC message structure`);
     return;
   }
   const { id, method, params } = msg;
@@ -1681,6 +1864,10 @@ rl.on('line', (line) => {
             const url = args?.url || '';
             if (!url) {
               respond(id, { content: [{ type: 'text', text: 'Please provide a GitHub repo URL (e.g., `import_repo({ url: "https://github.com/alirezarezvani/claude-skills" })`).' }] });
+              break;
+            }
+            if (!isValidGitUrl(url)) {
+              respond(id, { content: [{ type: 'text', text: `Invalid or unsafe git URL. Only http/https/ssh/git protocols are allowed. Provided: ${url.slice(0, 200)}` }] });
               break;
             }
             const result = importRepo(url);
