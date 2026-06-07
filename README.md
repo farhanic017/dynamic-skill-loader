@@ -1,123 +1,160 @@
 [![License](https://img.shields.io/badge/license-GPLv3-purple)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Node.js%2018%2B-green)]()
-[![Author](https://img.shields.io/badge/author-Farhan%20Dhrubo-red)](https://github.com/farhanic017)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](package.json)
+[![MCP](https://img.shields.io/badge/MCP-server-blue)](https://modelcontextprotocol.io/)
 [![Tests](https://img.shields.io/badge/tests-166%20passed-brightgreen)](aggressive-test.mjs)
 
-# Dynamic Skill Loader v3.0 — Universal Skill Dispatcher with Multi-Format Parsing, Agent Routing & External Repo Import
+# Dynamic Skill Loader
 
-> Created by [Farhan Dhrubo](https://github.com/farhanic017) — [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader-for/issues)
+**Universal MCP skill dispatcher for AI coding agents.** Load Claude Code skills, OpenCode skills, Cursor rules, Gemini-style markdown, command files, and external GitHub skill repos on demand without bloating every prompt.
 
-An MCP server and CLI that loads skills **on-demand** from any source, in any format, for any AI coding agent. Supports **5 skill formats**, **14 AI agents**, **nested multi-domain skills**, **external GitHub repo import**, and **intelligent lifecycle management** — zero-config.
+Dynamic Skill Loader is a zero-dependency Node.js MCP server and CLI for developers building with Claude Code, OpenCode, Cursor, Windsurf, Aider, Gemini CLI, Codex, Antigravity, Kilo Code, Augment, Hermes, Mistral Vibe, and other MCP-compatible coding assistants.
 
----
+![Dynamic Skill Loader demo](skill-dispatcher-demo.gif)
 
-## 📥 Drop-in install
+## Why Developers Star It
 
-### Via git clone
+- **On-demand AI skills:** match the current task to the right skill instead of loading every instruction file.
+- **Universal agent routing:** filter skills by agent so Claude, Cursor, Codex, OpenCode, and Gemini each see compatible formats.
+- **External repo import:** clone and index skills from any public GitHub repository with `--import-repo`.
+- **Context lifecycle management:** track active skills, score relevance, and unload stale instructions when the task changes.
+- **Multi-format parser:** supports YAML frontmatter, plain markdown, Gemini blockquotes, `.claude/commands`, and Claude Code skill files.
+- **Security hardened:** validates Git URLs, blocks path traversal, rejects prototype pollution keys, limits input size, and keeps MCP stdout clean.
+
+## Quick Start
+
 ```bash
 git clone --depth 1 --single-branch https://github.com/farhanic017/dynamic-skill-loader.git
 cd dynamic-skill-loader
+node index.mjs --skills-dir ./skills --list
+node index.mjs --skills-dir ./skills --match "build a GSAP landing page"
+```
+
+Run as an MCP server:
+
+```bash
 node index.mjs --skills-dir ./skills
 ```
 
-### Via npm (when published)
-```bash
-npx skill-dispatcher --skills-dir ./skills
-```
+Add it to an MCP-compatible assistant:
 
-### Manual MCP config (add to your AI coding assistant)
 ```jsonc
 {
   "mcp": {
     "skill-dispatcher": {
       "type": "local",
       "enabled": true,
-      "command": ["node", "/path/to/dynamic-skill-loader/index.mjs", "--skills-dir", "/path/to/your/skills"]
+      "command": [
+        "node",
+        "/path/to/dynamic-skill-loader/index.mjs",
+        "--skills-dir",
+        "/path/to/your/skills"
+      ]
     }
   }
 }
 ```
 
----
+## What It Solves
 
-## v3.0 What's new
+AI coding agents get weaker when every framework rule, design guide, deployment note, and workflow instruction is stuffed into context at once. Dynamic Skill Loader keeps those instructions searchable and loads only what the current task needs.
+
+Use it for:
+
+- Claude Code skill libraries
+- OpenCode and Cursor workflow instructions
+- MCP-powered agent toolkits
+- Personal AI coding playbooks
+- Team skill repositories
+- Prompt and context optimization
+- Agent-specific rule routing
+- Reusing skills across multiple coding assistants
+
+## v3.0 Features
 
 | Feature | What it does |
-|---------|-------------|
-| **5 skill formats** | Standard YAML, plain markdown, Gemini-style, command format, Claude Code skills |
-| **14 AI agent routing** | Skills auto-filtered per agent (OpenCode, Claude, Cursor, Windsurf, Aider, Gemini, Codex, Antigravity, Kilo Code, Augment, Hermes, Mistral Vibe, OpenClaw) |
-| **External repo import** | `--import-repo <url>` clones & indexes any GitHub repo's skills |
-| **Nested directory scanning** | Reads skills from `<domain>/<subdomain>/skills/<name>/SKILL.md` up to 4 levels deep |
-| **Custom command registry** | `.claude/commands/*.md` parsed as runnable commands |
-| **Cross-repo origin tracking** | Every skill tagged with its origin repo, filterable via `--origin` |
-| **Universal YAML parser** | Handles inline arrays, anchors, aliases, quoted keys, unicode, multi-doc, tab indentation, folded `>`, typed nulls, flow mappings, escape sequences, booleans, numerics |
-| **Tags fallback** | Skills with `tags:` (no `triggers:`) matched automatically |
-| **Security hardened** | Shell injection (spawnSync), path traversal (resolve+startsWith), prototype pollution rejection, input size limits, MCP message validation, embedded credential detection |
-| **162 tests, 0 failures** | MCP protocol stress, encoding, boundary, YAML syntax, expanded YAML, security, edge cases (import, unicode, deep nesting) |
+| --- | --- |
+| 5 skill formats | Standard YAML, plain markdown, Gemini-style markdown, command files, Claude Code skills |
+| 14 AI agents | OpenCode, Claude, Cursor, Windsurf, Aider, Gemini, Codex, Antigravity, Kilo Code, Augment, Hermes, Mistral Vibe, OpenClaw |
+| External repo import | `--import-repo <url>` clones and indexes public GitHub skill repos |
+| Nested scanning | Reads `<domain>/<subdomain>/skills/<name>/SKILL.md` up to 4 levels deep |
+| Command registry | Parses `.claude/commands/*.md` as reusable commands |
+| Cross-repo origin tracking | Tags every imported skill with its origin repo and filters via `--origin` |
+| Universal YAML parser | Handles arrays, anchors, aliases, quoted keys, Unicode, multi-doc, tabs, folded blocks, typed nulls, booleans, numerics, and comments |
+| Tags fallback | Uses `tags:` as matching triggers when `triggers:` are missing |
+| Security hardening | Blocks shell injection, path traversal, prototype pollution, oversized input, malformed MCP messages, and embedded credentials |
+| Test coverage | 166 aggressive tests for MCP protocol, parsing, encoding, security, import, and edge cases |
 
-## 11 MCP Tools
+## MCP Tools
 
-| Tool | What it does |
-|------|-------------|
-| `match_skills(query)` | Match query against skill triggers/description (fuzzy, synonym-expanded) |
-| `get_skill(name)` | Load full SKILL.md content; auto-tracks as active |
-| `list_skills()` | Browse all skills with [ACTIVE] indicators |
-| `unload_skill(name)` | Remove from active tracking |
-| `set_task_context({ description })` | Declare current task; get relevance scores & unload recommendations |
-| `get_active_skills()` | List loaded skills with domain, relevance, status, call count |
+| Tool | Purpose |
+| --- | --- |
+| `match_skills(query)` | Match a task against skill triggers, descriptions, tags, and aliases |
+| `get_skill(name)` | Load full skill content and mark it active |
+| `list_skills()` | Browse indexed skills with active indicators |
+| `unload_skill(name)` | Remove a skill from active tracking |
+| `set_task_context({ description })` | Set the current task and get relevance scores |
+| `get_active_skills()` | View loaded skills, relevance, status, and call count |
 | `set_workspace(scope)` | Restrict visible skills by name or trigger |
-| `import_repo({ url })` | Clone external repo and index its skills + commands |
-| `list_commands()` | Show all custom commands from `.claude/commands/` |
-| `set_agent({ name })` | Switch agent routing (filters skills by format compatibility) |
-| `get_publishable_keys()` | Get API keys (when configured) |
+| `import_repo({ url })` | Clone a public skill repo and index its skills and commands |
+| `list_commands()` | List custom commands from `.claude/commands/` |
+| `set_agent({ name })` | Switch agent routing and format compatibility |
+| `get_publishable_keys()` | Return configured publishable keys |
 
 ## Supported Skill Formats
 
-### 1. Standard YAML frontmatter (OpenCode-style)
+### YAML frontmatter
+
 ```markdown
 ---
 name: gsap-core
 description: Core GSAP animation library
 triggers:
-  - "gsap"
-  - "animation"
-  - "tween"
+  - gsap
+  - animation
+  - tween
 tags:
-  - "motion"      ← optional, used as fallback triggers
-alias:
-  - "gsap-core"   ← additional aliases
+  - motion
+aliases:
+  - gsap-core
 ---
+
 # gsap-core
-Full skill instructions here...
+
+Full skill instructions here.
 ```
 
-### 2. Plain markdown (no frontmatter)
+### Plain markdown
+
 ```markdown
 # My Skill Name
-> Description in blockquote (or inferred from content)
 
-This skill has no YAML frontmatter at all.
-It must be >120 characters to be recognized.
-Name is inferred from the H1 heading or directory name.
+> A short description can be inferred from a blockquote.
+
+The body must be long enough to identify this file as a useful skill.
 ```
 
-### 3. Gemini-style (`# heading` + `> blockquote`)
+### Gemini-style markdown
+
 ```markdown
 # my-gemini-skill
-> This blockquote description identifies this as a Gemini-style skill
+
+> This blockquote description identifies the skill.
 ```
 
-### 4. Command format (`.claude/commands/*.md`)
+### Claude command files
+
 ```markdown
 ---
-description: "Deploy the current branch to staging"
+description: Deploy the current branch to staging
 ---
-1. Run tests: `npm test`
-2. Build: `npm run build`
-3. Deploy: `npm run deploy:staging`
+
+1. Run tests.
+2. Build.
+3. Deploy.
 ```
 
-### 5. Claude Code skill format (`.claude/skills/*.md`)
+### Claude Code skills
+
 ```markdown
 ---
 name: my-claude-skill
@@ -125,150 +162,126 @@ description: A Claude Code skill with standard frontmatter
 triggers:
   - cc-task
 ---
-# Skill instructions here
+
+# Skill instructions
 ```
-Claude Code skills are placed in `.claude/skills/` and use the same YAML frontmatter as standard skills. They are auto-discovered by `indexSkills()` and tagged with `origin: 'claude-code'` and `format: 'claude'`.
 
 ## Agent Routing
 
-Each of the 14 supported agents sees only compatible skill formats:
+| Agent | Compatible formats |
+| --- | --- |
+| OpenCode | standard, plain, gemini, command, claude |
+| Claude Code / Desktop | standard, command, gemini, plain, claude |
+| Cursor | standard, plain |
+| Windsurf | standard, plain, gemini |
+| Codex | standard, command, plain |
+| Gemini CLI | gemini, standard, plain |
+| Aider | standard, plain |
+| Antigravity | standard, command, plain, gemini |
+| Kilo Code | standard, plain |
+| Augment | standard, plain, command |
+| Hermes | standard, gemini, plain |
+| Mistral Vibe | standard, plain |
+| OpenClaw | standard, plain, gemini |
 
-| Agent | Formats |
-|-------|---------|
-| **OpenCode** | standard, plain, gemini, command, claude |
-| **Claude Code / Desktop** | standard, command, gemini, plain, claude |
-| **Cursor** | standard, plain |
-| **Windsurf** | standard, plain, gemini |
-| **Codex** | standard, command, plain |
-| **Gemini CLI** | gemini, standard, plain |
-| **Aider** | standard, plain |
-| **Antigravity** | standard, command, plain, gemini |
-| **Kilo Code** | standard, plain |
-| **Augment** | standard, plain, command |
-| **Hermes** | standard, gemini, plain |
-| **Mistral Vibe** | standard, plain |
-| **OpenClaw** | standard, plain, gemini |
+## CLI Examples
 
-## CLI modes
-
-### MCP server mode (default)
-```bash
-skill-dispatcher --skills-dir ./skills
-```
-
-### Terminal mode
 ```bash
 # List all skills
-skill-dispatcher --list
+node index.mjs --skills-dir ./skills --list
 
-# Match by trigger
-skill-dispatcher --match "animation gsap"
+# Match by task
+node index.mjs --skills-dir ./skills --match "animation gsap"
 
-# Import external repo
-skill-dispatcher --import-repo https://github.com/user/claude-skills
+# Import an external skill repo
+node index.mjs --skills-dir ./skills --import-repo https://github.com/user/claude-skills
 
-# Show skills by origin
-skill-dispatcher --origin local
+# Show skills from one origin
+node index.mjs --skills-dir ./skills --origin local --list
 
-# Switch agent
-skill-dispatcher --agent cursor
+# Switch agent routing
+node index.mjs --skills-dir ./skills --agent cursor --list
 
-# List commands
-skill-dispatcher --list-commands
+# List command files
+node index.mjs --skills-dir ./skills --list-commands
 
-# Get full skill content
-skill-dispatcher --get gsap-core
+# Load full skill content
+node index.mjs --skills-dir ./skills --get gsap-core
 
-# Set task context
-skill-dispatcher --context "building a hero section"
+# Set task context and get lifecycle guidance
+node index.mjs --skills-dir ./skills --context "building a hero section"
 
 # Show active skills
-skill-dispatcher --active
+node index.mjs --skills-dir ./skills --active
 
-# Unload a skill
-skill-dispatcher --unload gsap-core
+# Unload a stale skill
+node index.mjs --skills-dir ./skills --unload gsap-core
 ```
 
 ## Options
 
 | Flag | Alias | Default | Description |
-|------|-------|---------|-------------|
+| --- | --- | --- | --- |
 | `--skills-dir` | `-s` | `./skills` | Path to skills directory |
-| `--list` | `-l` | — | List all available skills |
-| `--match` | `-m` | — | Match skills by trigger keywords |
-| `--get` | `-g` | — | Get full content of a specific skill |
-| `--unload` | `-u` | — | Unload a skill |
-| `--active` | `-a` | — | Show active skills with relevance |
-| `--context` | `-c` | — | Set task context |
-| `--import-repo` | — | — | Import skills from external GitHub repo |
-| `--agent` | — | `opencode` | Switch agent routing |
-| `--list-commands` | — | — | List custom commands |
-| `--origin` | — | `all` | Filter skills by origin repo |
-| `--simple` | — | — | Plain JSON output (for local models) |
-| `--agent-config` | — | — | JSON file with skill allow/block lists |
-| `--help` | `-h` | — | Show help |
-
-## YAML Features
-
-The parser handles all common and advanced YAML patterns found in skill definitions:
-
-| Feature | Example |
-|---------|---------|
-| Inline arrays | `triggers: [foo, bar]` |
-| Multi-line literal (\|) | `description: \|` block (newlines preserved) |
-| Folded block (>) | `description: >` block (lines joined with spaces) |
-| Typed nulls | `value: ~`, `value: null`, `value: Null`, `value: NULL` |
-| Flow mappings | `config: {a: 1, b: 2}` inline objects |
-| Escape sequences | `"line1\\nline2\\ttabbed"` in double-quoted strings |
-| Boolean literals | `yes`, `no`, `on`, `off`, `true`, `false` |
-| Numeric formats | `0xFF` hex, `1_000_000` separators, `1e3` scientific, `+42`, `.5` |
-| Anchors | `defaults: &defaults` with `<<: *defaults` |
-| Quoted keys | `"my key": value` (preserves spaces) |
-| Dots in keys | `some.key: value` |
-| Unicode keys | `ключ: значение` |
-| Multi-doc | `---\ndoc1\n---\doc2\n---` (first doc only) |
-| End marker | `...` stops parsing |
-| Tab indentation | Nested items with tabs |
-| Inline comments | `#` lines ignored |
-| Prototype pollution guard | Keys `__proto__`, `prototype`, `constructor` rejected |
-| Max nesting limit | 20 levels max before truncation |
+| `--list` | `-l` | n/a | List all available skills |
+| `--match` | `-m` | n/a | Match skills by trigger keywords |
+| `--get` | `-g` | n/a | Get full content of a skill |
+| `--unload` | `-u` | n/a | Unload a skill |
+| `--active` | `-a` | n/a | Show active skills with relevance |
+| `--context` | `-c` | n/a | Set task context |
+| `--import-repo` | n/a | n/a | Import skills from a public GitHub repo |
+| `--agent` | n/a | `opencode` | Switch agent routing |
+| `--list-commands` | n/a | n/a | List custom commands |
+| `--origin` | n/a | `all` | Filter skills by origin repo |
+| `--simple` | n/a | n/a | Plain JSON output for local models |
+| `--agent-config` | n/a | n/a | JSON file with skill allow/block lists |
+| `--help` | `-h` | n/a | Show help |
 
 ## Security
 
 | Protection | Implementation |
-|------------|---------------|
-| Shell injection | `spawnSync` (no shell) for all child processes; `execSync` eliminated |
-| Git URL validation | Only http/https/ssh/git protocols; rejects shell chars (`;`, `` ` ``, `$()`, `\`) |
-| Path traversal | `resolve()` + `startsWith()` ensures all reads stay within `SKILLS_DIR` |
-| Prototype pollution | `__proto__`, `prototype`, `constructor` keys rejected in all YAML input |
-| Input size limits | Max YAML value 100K chars, max nesting 20 levels, max 500 triggers, 5000 list items, 500 keys/object |
-| MCP validation | Message structure enforced (jsonrpc 2.0, valid types), 10MB max message size, 10MB max skill file |
-| Stderr sanitization | Auth tokens stripped from git error output |
+| --- | --- |
+| Shell injection | Uses `spawnSync` without shell execution for git operations |
+| Git URL validation | Allows only safe `http`, `https`, `ssh`, and `git` protocols |
+| Path traversal | Uses `resolve()` and base-directory checks before reading skills |
+| Prototype pollution | Rejects `__proto__`, `prototype`, and `constructor` keys |
+| Input size limits | Caps YAML values, nesting depth, trigger count, list size, object keys, MCP messages, and skill files |
+| MCP validation | Enforces JSON-RPC 2.0 structure and valid field types |
+| Stderr sanitization | Strips tokens from git error output |
 
 ## Project Structure
 
+```text
+dynamic-skill-loader/
+|-- index.mjs             # MCP server and CLI
+|-- install.py            # Optional installer
+|-- ALWAYS_ON.md          # Always-on skill dispatcher instructions
+|-- SKILL.md              # Self-describing skill
+|-- skills/               # Example skills
+|-- aggressive-test.mjs   # Aggressive test suite
+|-- test.mjs              # Focused test suite
+|-- README.md
+|-- LICENSE
+|-- NOTICE
+`-- package.json
 ```
-skill-dispatcher/
-├── index.mjs             # MCP server & CLI (v3.0 universal dispatcher, ~1930 lines)
-├── ALWAYS_ON.md          # Permanent lifecycle instructions
-├── SKILL.md              # self-defining skill
-├── aggressive-test.mjs   # 162-test suite (MCP, encoding, YAML, security, edge cases)
-├── README.md
-├── LICENSE               # GPL-3.0
-├── NOTICE
-├── package.json
-└── .gitignore
+
+## Recommended GitHub Topics
+
+Add these topics in the GitHub repository sidebar to improve discovery:
+
+```text
+mcp, mcp-server, model-context-protocol, ai-agent, ai-coding, claude-code, opencode, cursor-ai, codex, gemini-cli, skill-loader, prompt-engineering, context-management, developer-tools, agent-tools
 ```
 
----
+## Contributing
 
-## Copyright & License
+Bug reports, feature requests, docs improvements, and new skill-format examples are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**Copyright (c) 2026 Farhan Dhrubo** — All rights reserved.
+If this saves tokens or makes your AI coding workflow cleaner, starring the repo helps other developers find it.
 
-Licensed under the **GNU General Public License v3.0**.
-See [LICENSE](./LICENSE) and [NOTICE](./NOTICE) for full details.
+## License
 
----
+Copyright (c) 2026 Farhan Dhrubo.
 
-*Built with Node.js, MCP, and 162 tests that never lie.*
+Licensed under the [GNU General Public License v3.0](LICENSE). See [NOTICE](NOTICE) for attribution details.

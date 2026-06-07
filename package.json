@@ -1,29 +1,52 @@
 {
   "name": "skill-dispatcher",
-  "version": "1.0.0",
-  "description": "On-demand skill loader for AI coding assistants. Load skills by trigger keywords — like Claude Code's skill system, for any MCP-compatible tool.",
+  "version": "3.0.0",
+  "description": "Universal MCP skill dispatcher for AI coding agents. Load Claude Code, OpenCode, Cursor, Gemini, command, and GitHub-hosted skills on demand.",
   "type": "module",
   "bin": {
     "skill-dispatcher": "./index.mjs"
   },
+  "scripts": {
+    "test": "node aggressive-test.mjs",
+    "test:quick": "node test.mjs",
+    "start": "node index.mjs --skills-dir ./skills",
+    "list": "node index.mjs --skills-dir ./skills --list"
+  },
   "keywords": [
     "mcp",
+    "mcp-server",
     "model-context-protocol",
+    "ai-agent",
+    "ai-agents",
+    "agent-tools",
     "skills",
+    "claude",
     "claude-code",
     "opencode",
     "cursor",
+    "cursor-ai",
+    "windsurf",
+    "codex",
+    "gemini-cli",
     "ai-coding",
+    "ai-coding-assistant",
     "coding-assistant",
     "skill-loader",
-    "trigger-matching"
+    "skill-dispatcher",
+    "trigger-matching",
+    "prompt-engineering",
+    "context-management",
+    "developer-tools"
   ],
   "license": "GPL-3.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/farhanic017/dynamic-skill-loader-for-opencode"
+    "url": "git+https://github.com/farhanic017/dynamic-skill-loader.git"
   },
-  "homepage": "https://github.com/farhanic017/dynamic-skill-loader-for-opencode",
+  "homepage": "https://github.com/farhanic017/dynamic-skill-loader#readme",
+  "bugs": {
+    "url": "https://github.com/farhanic017/dynamic-skill-loader/issues"
+  },
   "author": "Farhan Dhrubo (https://github.com/farhanic017)",
   "private": false,
   "files": [

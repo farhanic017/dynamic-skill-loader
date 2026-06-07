@@ -1,164 +1,105 @@
 ---
 name: skill-dispatcher
 description: >
-  On-demand skill loader with intelligent lifecycle management for AI coding
-  assistants. 6 MCP tools: match_skills, get_skill, list_skills, unload_skill,
-  set_task_context, get_active_skills. Auto-tracks loaded skills, computes
-  relevance against task context, recommends stale skills for unloading.
-  Zero-config — works with any current or future skill. Zero dependencies.
-  Works with any model (local or cloud) via MCP stdio.
+  Universal MCP skill dispatcher for AI coding agents. Loads Claude Code,
+  OpenCode, Cursor, Gemini-style, command, plain markdown, and GitHub-hosted
+  skills on demand. Includes agent routing, active skill lifecycle tracking,
+  external repo import, nested skill discovery, origin filtering, and hardened
+  parsing for secure context management.
 triggers:
   - skill-dispatcher
-  - skill loader
+  - dynamic skill loader
   - dynamic skill
+  - skill loader
+  - skill dispatcher
   - on-demand skills
-  - trigger matching
-  - install skill-dispatcher
-  - setup skill-dispatcher
-  - always-on skills
+  - mcp server
+  - model context protocol
+  - ai coding agent
+  - ai coding assistant
+  - claude code skills
   - opencode skills
-  - vscode mcp
-  - antigravity mcp
-  - cursor mcp
-  - claude mcp
-  - skill lifecycle
-  - unload skills
-  - active skills
-  - task context
-  - token optimization
+  - cursor rules
+  - gemini cli skills
+  - codex skills
+  - agent routing
+  - external repo import
+  - github skills
+  - prompt engineering
   - context management
+  - token optimization
+  - active skills
+  - unload skills
+tags:
+  - mcp
+  - mcp-server
+  - ai-agent
+  - ai-coding
+  - claude-code
+  - opencode
+  - cursor-ai
+  - codex
+  - gemini-cli
+  - skill-loader
+  - context-management
 ---
 
-# Dynamic Skill Loader — v2.0: Smart Lifecycle Management
+# Dynamic Skill Loader
 
-An MCP server that loads AI coding skills **on-demand** with intelligent
-lifecycle management. Skills are auto-tracked when loaded, scored against
-the current task context, and stale skills are recommended for unloading.
+Dynamic Skill Loader is a zero-dependency Node.js MCP server and CLI that indexes skill files and loads only the instructions relevant to the current task.
 
-**Always-on** via `ALWAYS_ON.md` — the model automatically calls
-`match_skills` at task start and manages lifecycle with `set_task_context`.
+It helps AI coding agents avoid context bloat by matching a task to skills, loading selected skill content, tracking what is active, and recommending stale skills for unloading when the task changes.
 
-Works with **any model** (local or cloud) and **any MCP-compatible client**.
+## Core Capabilities
 
-## v2.0 New Features
+| Capability | Description |
+| --- | --- |
+| Multi-format skills | YAML frontmatter, plain markdown, Gemini-style markdown, `.claude/commands`, and Claude Code skills |
+| Agent routing | Filters compatible formats for Claude, OpenCode, Cursor, Windsurf, Aider, Gemini, Codex, Antigravity, Kilo Code, Augment, Hermes, Mistral Vibe, and OpenClaw |
+| External repo import | Clones public GitHub skill repos with `--import-repo` and tracks skill origin |
+| Lifecycle tracking | Marks loaded skills active, scores relevance, and suggests stale skills to unload |
+| Nested discovery | Finds skills in domain and subdomain folder structures |
+| Security hardening | Validates Git URLs, blocks path traversal, rejects prototype pollution keys, limits input size, validates MCP messages, and sanitizes git errors |
 
-| Feature | What it does |
-|---------|-------------|
-| **Task context tracking** | `set_task_context` declares what you're working on |
-| **Relevance scoring** | Each loaded skill is scored against your context |
-| **Auto-unload recommendations** | Stale skills flagged for unloading |
-| **Skill families** | Auto-detected from shared trigger keywords |
-| **Active skill dashboard** | `get_active_skills` shows full lifecycle status |
+## MCP Tools
 
-## 6 MCP Tools
-
-| Tool | What it does |
-|------|-------------|
-| `match_skills(query)` | Matches your task against skill triggers (fuzzy, case-insensitive) |
-| `get_skill(name)` | Loads full SKILL.md content; auto-tracks as active |
-| `list_skills()` | Browses all skills with active indicators |
-| `unload_skill(name)` | Unloads a skill; removes from active tracking |
-| `set_task_context({ description })` | Declares current task; returns relevance scores & unload recommendations |
-| `get_active_skills()` | Lists loaded skills with domain, relevance, status, call count |
-
-## Lifecycle flow
-
-```
-match_skills("hero section with animations")
-  → get_skill("gsap-core")           ← auto-tracked ACTIVE
-  → get_skill("frontend-design")     ← auto-tracked ACTIVE
-  → set_task_context("building hero section")
-    → both relevant ✓
-
-[switch to: "set up Supabase auth"]
-  → set_task_context("setting up Supabase")
-    → gsap-core stale ✗
-    → frontend-design stale ✗
-  → unload_skill("gsap-core")
-  → unload_skill("frontend-design")
-  → match_skills("supabase auth")
-  → get_skill("supabase")
-```
+| Tool | Purpose |
+| --- | --- |
+| `match_skills(query)` | Match a task against skill triggers, descriptions, tags, and aliases |
+| `get_skill(name)` | Load full skill content and mark it active |
+| `list_skills()` | Browse indexed skills with active indicators |
+| `unload_skill(name)` | Remove a skill from active tracking |
+| `set_task_context({ description })` | Set the current task and return relevance scores |
+| `get_active_skills()` | List loaded skills with domain, relevance, status, and call count |
+| `set_workspace(scope)` | Restrict visible skills by name or trigger |
+| `import_repo({ url })` | Clone a public skill repo and index its skills and commands |
+| `list_commands()` | Show custom commands from `.claude/commands/` |
+| `set_agent({ name })` | Switch agent routing and format compatibility |
+| `get_publishable_keys()` | Return configured publishable keys |
 
 ## Usage
 
 ```bash
-# MCP server (default)
-node index.mjs --skills-dir ./skills
-
-# CLI: list skills
 node index.mjs --skills-dir ./skills --list
-
-# CLI: match skills
 node index.mjs --skills-dir ./skills --match "animation gsap"
-
-# CLI: get skill (tracks as active)
 node index.mjs --skills-dir ./skills --get gsap-core
-
-# CLI: set task context (lifecycle recommendation)
 node index.mjs --skills-dir ./skills --context "building a hero section"
-
-# CLI: show active skills
 node index.mjs --skills-dir ./skills --active
-
-# CLI: unload skill
 node index.mjs --skills-dir ./skills --unload gsap-core
+node index.mjs --skills-dir ./skills --import-repo https://github.com/user/claude-skills
 ```
 
-## Relevance Engine
+## Always-On Pattern
 
-The dispatcher scores each loaded skill against the task context by
-analyzing token overlap between the context and the skill's triggers,
-name, and description. No hardcoded domains — works with any skill:
+At task start:
 
-- **Relevant** (score ≥ 0.30): Skill matches the task — keep loaded
-- **Low** (score 0.10–0.29): Marginal match — keep if domain-related
-- **Stale** (score < 0.10): No match — recommended for unloading
+1. Call `match_skills` with the task description.
+2. Load relevant matches with `get_skill`.
+3. Call `set_task_context` to enable lifecycle tracking.
 
-## Skill Families
+When switching domains:
 
-Skills that share trigger keywords are auto-detected as a "family".
-For example, if three skills all trigger on "design", they form a
-family. When you load one, the dispatcher suggests the others.
-
-## Quick Install
-
-```bash
-git clone https://github.com/farhanic017/dynamic-skill-loader-for-opencode.git
-cd dynamic-skill-loader-for-opencode
-python install.py
-```
-
-Or add to your MCP config:
-
-```jsonc
-// opencode.jsonc
-{
-  "mcp": {
-    "skill-dispatcher": {
-      "type": "local",
-      "command": ["node", "/full/path/to/index.mjs", "--skills-dir", "/path/to/skills"],
-      "enabled": true
-    }
-  }
-}
-```
-
-## Config Instructions
-
-Create an `instructions.md` referencing the always-on file:
-
-```markdown
-# HARD RULES
-## 1. Skill-Dispatcher — ALWAYS ON AT TASK START
-- At task start: call `match_skills`, load matches with `get_skill`
-- After loading: call `set_task_context` to enable lifecycle management
-- When switching domains: `set_task_context` again, then `unload_skill` stale ones
-- `get_active_skills()` to check what's loaded before unloading
-- `list_skills()` to browse when match_skills returns nothing
-```
-
-## Copyright & License
-
-**Copyright (c) 2026 Farhan Dhrubo** — All rights reserved.
-Licensed under **GNU General Public License v3.0**.
+1. Call `set_task_context` with the new task.
+2. Check stale recommendations.
+3. Unload stale skills with `unload_skill`.
+4. Match and load skills for the new domain.

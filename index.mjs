@@ -1580,7 +1580,7 @@ rl.on('line', (line) => {
         respond(id, {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'skill-dispatcher', version: '2.0.0' },
+          serverInfo: { name: 'skill-dispatcher', version: '3.0.0' },
         });
         break;
 

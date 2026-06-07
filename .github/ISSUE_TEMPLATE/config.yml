@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/farhanic017/dynamic-skill-loader/discussions
+    about: Use discussions for workflow ideas, agent compatibility notes, and launch feedback.
