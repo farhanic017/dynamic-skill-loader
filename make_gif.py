@@ -58,6 +58,7 @@ FONT = font(21)
 FONT_MD = font(25, True)
 FONT_LG = font(36, True)
 FONT_MONO = font(18)
+FONT_MONO_SM = font(15)
 
 
 def text_w(draw, text, fnt):
@@ -78,6 +79,37 @@ def wrap(draw, text, fnt, max_width):
     if current:
         lines.append(current)
     return lines
+
+
+def fit_wrapped_text(draw, text, fonts, max_width, max_lines=None):
+    for fnt in fonts:
+        lines = wrap(draw, text, fnt, max_width)
+        if max_lines is None or len(lines) <= max_lines:
+            return fnt, lines if max_lines is None else lines[:max_lines]
+    fnt = fonts[-1]
+    lines = wrap(draw, text, fnt, max_width)
+    if max_lines is not None:
+        lines = lines[:max_lines]
+    return fnt, lines
+
+
+def ellipsize(draw, text, fnt, max_width):
+    if text_w(draw, text, fnt) <= max_width:
+        return text
+    ellipsis = "..."
+    if text_w(draw, ellipsis, fnt) > max_width:
+        return ""
+    lo, hi = 0, len(text)
+    best = ellipsis
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = text[:mid].rstrip() + ellipsis
+        if text_w(draw, candidate, fnt) <= max_width:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
 
 
 def rounded(draw, box, fill, outline=None, width=1, radius=18):
@@ -111,9 +143,7 @@ def load_mascot():
 MASCOT = load_mascot()
 
 
-def paste_part(canvas, part, x, y, angle=0):
-    if angle:
-        part = part.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+def paste_part(canvas, part, x, y):
     canvas.alpha_composite(part, (int(x), int(y)))
 
 
@@ -126,73 +156,27 @@ def crop_part(source, mask_box):
 def animated_mascot_source(phase=0.0, mood="talk"):
     source = MASCOT.copy()
     w, h = source.size
-    alpha = source.getchannel("A")
     base = source.copy()
-    bp = base.load()
 
     left_box = (0, int(h * 0.28), int(w * 0.30), int(h * 0.62))
     right_box = (int(w * 0.70), int(h * 0.28), w, int(h * 0.62))
     tentacle_box = (int(w * 0.18), int(h * 0.51), int(w * 0.82), h)
 
-    # Remove movable appendages from the base layer, then recompose them with
-    # small transforms so the real mascot artwork moves instead of being redrawn.
-    for x1, y1, x2, y2 in [left_box, right_box, tentacle_box]:
-        for yy in range(y1, y2):
-            for xx in range(x1, x2):
-                if alpha.getpixel((xx, yy)) > 0:
-                    bp[xx, yy] = (0, 0, 0, 0)
-
     left, lx, ly = crop_part(source, left_box)
     right, rx, ry = crop_part(source, right_box)
     tentacles, tx, ty = crop_part(source, tentacle_box)
 
-    arm_angle = math.sin(phase) * 9
-    tentacle_dx = math.sin(phase + 1.1) * 6
-    tentacle_dy = math.cos(phase * 1.2) * 3
-    paste_part(base, left, lx + math.sin(phase + 0.4) * 4, ly + math.cos(phase) * 3, -arm_angle)
-    paste_part(base, right, rx + math.sin(phase + 2.4) * 4, ry + math.cos(phase + 1.0) * 3, arm_angle)
-    paste_part(base, tentacles, tx + tentacle_dx, ty + tentacle_dy, math.sin(phase * 0.8) * 2.5)
-
-    draw = ImageDraw.Draw(base)
-    face = (
-        int(w * 0.24),
-        int(h * 0.27),
-        int(w * 0.78),
-        int(h * 0.43),
-    )
-    face_color = source.getpixel((int(w * 0.50), int(h * 0.34)))[:3]
-
-    # Hide the original eyes with small purple patches, then draw animated eyes.
-    draw.rounded_rectangle([int(w * 0.25), int(h * 0.30), int(w * 0.43), int(h * 0.42)], radius=8, fill=face_color)
-    draw.rounded_rectangle([int(w * 0.56), int(h * 0.30), int(w * 0.74), int(h * 0.42)], radius=8, fill=face_color)
-
-    expr_cycle = int((phase % math.tau) / math.tau * 4)
-    if mood == "celebrate":
-        expr_cycle = 0
-    elif mood == "point":
-        expr_cycle = (expr_cycle + 1) % 4
-
-    lw = max(5, int(w * 0.022))
-    left_eye = (int(w * 0.33), int(h * 0.36))
-    right_eye = (int(w * 0.64), int(h * 0.36))
-    if expr_cycle == 0:
-        # Happy upturned eyes, close to the original mascot expression.
-        for cx, cy in [left_eye, right_eye]:
-            draw.line([(cx - 22, cy + 8), (cx - 8, cy - 12), (cx + 8, cy - 12), (cx + 22, cy + 8)], fill="#050505", width=lw, joint="curve")
-    elif expr_cycle == 1:
-        # Blink.
-        for cx, cy in [left_eye, right_eye]:
-            draw.line([(cx - 22, cy), (cx + 22, cy)], fill="#050505", width=lw)
-    elif expr_cycle == 2:
-        # Focused dots.
-        for cx, cy in [left_eye, right_eye]:
-            draw.ellipse([cx - 13, cy - 13, cx + 13, cy + 13], fill="#050505")
-    else:
-        # Curious asymmetry.
-        cx, cy = left_eye
-        draw.line([(cx - 22, cy + 7), (cx - 8, cy - 11), (cx + 8, cy - 11), (cx + 22, cy + 7)], fill="#050505", width=lw, joint="curve")
-        cx, cy = right_eye
-        draw.ellipse([cx - 13, cy - 13, cx + 13, cy + 13], fill="#050505")
+    # Keep the original mascot fully intact. The overlays are exact cropped
+    # pixels from the mascot, nudged by integer offsets to create arm/tentacle
+    # motion without repainting the face or changing the design.
+    left_dx = round(math.sin(phase + 0.3) * 5)
+    right_dx = round(math.sin(phase + 2.3) * 5)
+    arm_dy = round(math.cos(phase) * 3)
+    tentacle_dx = round(math.sin(phase + 1.1) * 4)
+    tentacle_dy = round(math.cos(phase * 1.2) * 3)
+    paste_part(base, left, lx + left_dx, ly + arm_dy)
+    paste_part(base, right, rx + right_dx, ry - arm_dy)
+    paste_part(base, tentacles, tx + tentacle_dx, ty + tentacle_dy)
 
     return base
 
@@ -204,7 +188,7 @@ def paste_mascot(img, x, y, height=265, phase=0.0, mood="talk"):
     scale = height / source.height
     w = int(source.width * scale * squash)
     h = int(source.height * scale)
-    mascot = source.resize((w, h), Image.Resampling.LANCZOS)
+    mascot = source.resize((w, h), Image.Resampling.NEAREST)
 
     shadow = Image.new("RGBA", (w + 42, h + 42), (0, 0, 0, 0))
     shadow.alpha_composite(mascot, (21, 18))
@@ -219,24 +203,37 @@ def paste_mascot(img, x, y, height=265, phase=0.0, mood="talk"):
     elif mood == "celebrate":
         for dx, dy, color in [(-20, -24, YELLOW), (w + 15, -12, CYAN), (w + 40, 42, PINK)]:
             draw.ellipse([x + dx, y + bob + dy, x + dx + 10, y + bob + dy + 10], fill=color)
+    elif mood == "talk":
+        dot_y = y + bob + 12
+        for i, color in enumerate([PURPLE, CYAN, PINK]):
+            radius = 3 + int((math.sin(phase + i) + 1) * 2)
+            cx = x + w + 10 + i * 16
+            draw.ellipse([cx - radius, dot_y - radius, cx + radius, dot_y + radius], fill=color)
 
 
 def speech(draw, box, title, body, accent=PURPLE):
     x1, y1, x2, y2 = box
     rounded(draw, box, "#FFFFFF", "#E2E8F0", 2, 22)
-    title_lines = wrap(draw, title, FONT_MD, x2 - x1 - 48)
-    y = y1 + 18
-    for line in title_lines[:2]:
-        draw.text((x1 + 24, y), line, font=FONT_MD, fill="#0F172A")
-        y += 30
-    y += 4
-    body_font = FONT_SM
-    max_body_y = y2 - 30
-    for line in wrap(draw, body, body_font, x2 - x1 - 48):
-        if y + 22 > max_body_y:
+    max_width = x2 - x1 - 48
+    title_font, title_lines = fit_wrapped_text(draw, title, [FONT_MD, FONT, FONT_SM], max_width, max_lines=2)
+    body_font, body_lines = fit_wrapped_text(draw, body, [FONT_SM, FONT_XS], max_width)
+
+    while True:
+        title_line_h = title_font.size + 5
+        body_line_h = body_font.size + 6
+        total_h = 18 + len(title_lines) * title_line_h + 6 + len(body_lines) * body_line_h + 28
+        if total_h <= (y2 - y1) or body_font == FONT_XS:
             break
+        body_font, body_lines = fit_wrapped_text(draw, body, [FONT_XS], max_width)
+
+    y = y1 + 18
+    for line in title_lines:
+        draw.text((x1 + 24, y), line, font=title_font, fill="#0F172A")
+        y += title_line_h
+    y += 4
+    for line in body_lines:
         draw.text((x1 + 24, y), line, font=body_font, fill="#1E293B")
-        y += 24
+        y += body_line_h
     draw.rectangle([x1, y2 - 8, x2, y2], fill=accent)
 
 
@@ -255,12 +252,22 @@ def card(draw, box, heading, bullets, accent=CYAN):
     x1, y1, x2, y2 = box
     rounded(draw, box, PANEL, BORDER, 2, 18)
     draw.rectangle([x1, y1, x1 + 8, y2], fill=accent)
-    draw.text((x1 + 26, y1 + 18), heading, font=FONT_MD, fill=INK)
-    y = y1 + 62
+    heading_font, heading_lines = fit_wrapped_text(draw, heading, [FONT_MD, FONT, FONT_SM], x2 - x1 - 52, max_lines=2)
+    y = y1 + 18
+    for line in heading_lines:
+        draw.text((x1 + 26, y), line, font=heading_font, fill=INK)
+        y += heading_font.size + 5
+    y += 8
+    bullet_font = FONT_XS if len(bullets) > 5 else FONT_SM
+    line_h = bullet_font.size + 10
     for bullet in bullets:
+        if y + line_h > y2 - 12:
+            break
         draw.ellipse([x1 + 28, y + 8, x1 + 38, y + 18], fill=accent)
-        draw.text((x1 + 50, y), bullet, font=FONT_SM, fill=MUTED)
-        y += 32
+        max_width = x2 - x1 - 70
+        bullet_text = ellipsize(draw, bullet, bullet_font, max_width)
+        draw.text((x1 + 50, y), bullet_text, font=bullet_font, fill=MUTED)
+        y += line_h
 
 
 def terminal(draw, box, heading, lines, highlight=None):
@@ -271,8 +278,19 @@ def terminal(draw, box, heading, lines, highlight=None):
         draw.ellipse([x1 + 18 + i * 24, y1 + 16, x1 + 30 + i * 24, y1 + 28], fill=color)
     draw.text((x1 + 104, y1 + 12), heading, font=FONT_SM, fill=SOFT)
 
+    non_empty_lines = [line for line in lines]
+    available_h = y2 - (y1 + 62) - 18
+    line_h = 24
+    text_font = FONT_MONO
+    if len(non_empty_lines) * line_h > available_h:
+        line_h = 20
+        text_font = FONT_MONO_SM
+    if len(non_empty_lines) * line_h > available_h:
+        line_h = 18
+        text_font = FONT_XS
+
     y = y1 + 62
-    max_y = y2 - 22
+    max_y = y2 - line_h - 8
     max_width = x2 - x1 - 48
     for i, line in enumerate(lines):
         if y > max_y:
@@ -288,15 +306,14 @@ def terminal(draw, box, heading, lines, highlight=None):
         elif line.startswith("!"):
             color = YELLOW
             shown = line[1:]
-        text_font = FONT_MONO
-        if text_w(draw, shown, text_font) > max_width:
-            text_font = FONT_XS
-        while text_w(draw, shown, text_font) > max_width and len(shown) > 8:
-            shown = shown[:-2] + "..."
+        line_font = text_font
+        if text_w(draw, shown, line_font) > max_width:
+            line_font = FONT_XS
+        shown = ellipsize(draw, shown, line_font, max_width)
         if highlight == i:
-            rounded(draw, [x1 + 14, y - 4, x2 - 14, y + 25], "#172554", "#2563EB", 1, 9)
-        draw.text((x1 + 24, y), shown, font=text_font, fill=color)
-        y += 24
+            rounded(draw, [x1 + 14, y - 4, x2 - 14, y + line_h + 1], "#172554", "#2563EB", 1, 9)
+        draw.text((x1 + 24, y), shown, font=line_font, fill=color)
+        y += line_h
 
 
 SCENES = [
@@ -306,11 +323,11 @@ SCENES = [
         "subhead": "A universal MCP skill dispatcher for AI coding agents.",
         "bubble": ("I am the skill dispatcher.", "Give me a task, and I load only the useful instructions."),
         "card": ("What I do", [
-            "match the current task",
-            "load the right skill file",
-            "keep unrelated rules out",
+            "match current tasks",
+            "load right skill files",
+            "keep noise out",
             "track active skills",
-            "clean up stale context",
+            "clean stale context",
         ], PURPLE),
     },
     {
@@ -319,10 +336,10 @@ SCENES = [
         "subhead": "Design rules, framework notes, deployment steps, and command playbooks all compete for attention.",
         "bubble": ("The fix is simple.", "Index everything, but load only what the task needs."),
         "card": ("Without it", [
-            "prompt context gets bloated",
-            "wrong rules influence answers",
-            "team skills are hard to reuse",
-            "old instructions stay active",
+            "bloated prompt context",
+            "wrong rules leak in",
+            "skills are hard to reuse",
+            "old rules stay active",
         ], RED),
     },
     {
@@ -357,9 +374,9 @@ SCENES = [
         "subhead": "You do not need to rewrite every instruction file before using the dispatcher.",
         "bubble": ("Five formats work.", "YAML, markdown, Gemini notes, commands, and Claude Code skills."),
         "card": ("Supported formats", [
-            "YAML frontmatter skills",
-            "plain markdown instructions",
-            "Gemini-style heading + quote",
+            "YAML frontmatter",
+            "plain markdown",
+            "Gemini heading + quote",
             ".claude/commands/*.md",
             ".claude/skills/*.md",
         ], CYAN),
@@ -410,12 +427,12 @@ SCENES = [
         "subhead": "The loader validates the data it reads before returning instructions to an AI client.",
         "bubble": ("Imported text is checked.", "Git imports, paths, YAML, and MCP messages all get validated."),
         "card": ("Protections", [
-            "safe Git URL validation",
-            "path traversal checks",
-            "prototype pollution rejection",
-            "MCP JSON-RPC validation",
+            "safe Git URL checks",
+            "path traversal blocked",
+            "prototype keys blocked",
+            "MCP messages validated",
             "input size limits",
-            "credential redaction in errors",
+            "tokens redacted in errors",
         ], GREEN),
     },
     {
@@ -424,11 +441,11 @@ SCENES = [
         "subhead": "Dynamic Skill Loader gives every AI coding agent a searchable skill library instead of a giant always-on prompt.",
         "bubble": ("That is the whole trick.", "Load the right knowledge at the right time, then clean it up."),
         "card": ("Why star it", [
-            "zero runtime dependencies",
-            "14 agent routing profiles",
+            "zero dependencies",
+            "14 agent profiles",
             "5 skill formats",
-            "external GitHub import",
-            "active skill lifecycle",
+            "GitHub repo import",
+            "active skill tracking",
             "166 passing tests",
         ], PURPLE),
         "footer": "github.com/farhanic017/dynamic-skill-loader",
@@ -451,14 +468,14 @@ def render_scene(scene, subframe, total):
     paste_mascot(img, mascot_x, mascot_y, 252, phase, mood)
     draw = ImageDraw.Draw(img)
 
-    speech(draw, [260, 188, 626, 318], scene["bubble"][0], scene["bubble"][1], PURPLE)
-
     if "terminal" in scene:
+        speech(draw, [258, 176, 664, 328], scene["bubble"][0], scene["bubble"][1], PURPLE)
         heading, lines, highlight = scene["terminal"]
-        terminal(draw, [288, 336, 904, 526], heading, lines, highlight)
+        terminal(draw, [284, 316, 924, 526], heading, lines, highlight)
     else:
+        speech(draw, [258, 176, 626, 328], scene["bubble"][0], scene["bubble"][1], PURPLE)
         heading, bullets, accent = scene["card"]
-        card(draw, [648, 180, 904, 504], heading, bullets, accent)
+        card(draw, [646, 176, 924, 506], heading, bullets, accent)
 
     if scene.get("footer"):
         draw.text((420, 506), scene["footer"], font=FONT_SM, fill=CYAN)
