@@ -154,52 +154,26 @@ def crop_part(source, mask_box):
 
 
 def animated_mascot_source(phase=0.0, mood="talk"):
-    source = MASCOT.copy()
-    w, h = source.size
-    base = source.copy()
-
-    left_box = (0, int(h * 0.28), int(w * 0.30), int(h * 0.62))
-    right_box = (int(w * 0.70), int(h * 0.28), w, int(h * 0.62))
-    tentacle_box = (int(w * 0.18), int(h * 0.51), int(w * 0.82), h)
-
-    left, lx, ly = crop_part(source, left_box)
-    right, rx, ry = crop_part(source, right_box)
-    tentacles, tx, ty = crop_part(source, tentacle_box)
-
-    # Keep the original mascot fully intact. The overlays are exact cropped
-    # pixels from the mascot, nudged by integer offsets to create arm/tentacle
-    # motion without repainting the face or changing the design.
-    left_dx = round(math.sin(phase + 0.3) * 5)
-    right_dx = round(math.sin(phase + 2.3) * 5)
-    arm_dy = round(math.cos(phase) * 3)
-    tentacle_dx = round(math.sin(phase + 1.1) * 4)
-    tentacle_dy = round(math.cos(phase * 1.2) * 3)
-    paste_part(base, left, lx + left_dx, ly + arm_dy)
-    paste_part(base, right, rx + right_dx, ry - arm_dy)
-    paste_part(base, tentacles, tx + tentacle_dx, ty + tentacle_dy)
-
-    return base
+    return MASCOT.copy()
 
 
 def paste_mascot(img, x, y, height=265, phase=0.0, mood="talk"):
     bob = math.sin(phase) * 8
-    squash = 1 + math.sin(phase + 0.7) * 0.018
     source = animated_mascot_source(phase, mood)
     scale = height / source.height
-    w = int(source.width * scale * squash)
+    w = int(source.width * scale)
     h = int(source.height * scale)
     mascot = source.resize((w, h), Image.Resampling.NEAREST)
 
-    shadow = Image.new("RGBA", (w + 42, h + 42), (0, 0, 0, 0))
-    shadow.alpha_composite(mascot, (21, 18))
-    shadow = shadow.filter(ImageFilter.GaussianBlur(14))
-    img.alpha_composite(shadow, (int(x - 12), int(y + bob + 16)))
     img.alpha_composite(mascot, (int(x), int(y + bob)))
 
     draw = ImageDraw.Draw(img)
     if mood == "point":
         pulse = 7 + int((math.sin(phase) + 1) * 4)
         draw.ellipse([x + w + 34 - pulse, y + bob + h * 0.34 - pulse, x + w + 34 + pulse, y + bob + h * 0.34 + pulse], outline=CYAN, width=3)
+        for offset in [0, 10, 20]:
+            yy = y + bob + h * 0.44 + math.sin(phase + offset) * 5
+            draw.arc([x + w - 8 + offset, yy - 12, x + w + 18 + offset, yy + 12], 300, 60, fill=PURPLE, width=3)
     elif mood == "celebrate":
         for dx, dy, color in [(-20, -24, YELLOW), (w + 15, -12, CYAN), (w + 40, 42, PINK)]:
             draw.ellipse([x + dx, y + bob + dy, x + dx + 10, y + bob + dy + 10], fill=color)
