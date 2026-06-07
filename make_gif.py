@@ -1,263 +1,385 @@
 #!/usr/bin/env python3
-#  Dynamic Skill Loader for OpenCode  ───  Demo GIF Generator
-#  Copyright (c) 2026 Farhan Dhrubo  <farhaiee123@gmail.com>
-#  License: GPL-3.0  —  https://github.com/farhanic017/dynamic-skill-loader-for-opencode
-#
-#  This program is free software. You may NOT remove this notice,
-#  re-distribute as your own work, or sell without attribution.
-# =============================================================================
+# Dynamic Skill Loader --- Demo GIF Generator
+# Copyright (c) 2026 Farhan Dhrubo  <farhaiee123@gmail.com>
+# License: GPL-3.0  ---  https://github.com/farhanic017/dynamic-skill-loader
 
 """
-Generate a cute pixel squid animated GIF showing skill-dispatcher workflow.
+Generate the README demo GIF using the real project mascot.
+
+The source mascot lives at assets/mascot.png with a transparent background.
+Run this script after updating copy, features, or mascot art:
+
+    python make_gif.py
 """
 
-from PIL import Image, ImageDraw, ImageFont
-import math, os
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import math
 
-W, H = 480, 280
-BG = "#1A1A2E"
+ROOT = Path(__file__).resolve().parent
+MASCOT_PATH = ROOT / "assets" / "mascot.png"
+OUT_PATH = ROOT / "skill-dispatcher-demo.gif"
 
-def new_frame():
-    img = Image.new("RGBA", (W, H), BG)
+W, H = 960, 540
+BG_TOP = "#070A12"
+BG_BOTTOM = "#121827"
+INK = "#F8FAFC"
+MUTED = "#CBD5E1"
+SOFT = "#94A3B8"
+PANEL = "#111827"
+PANEL_2 = "#0B1120"
+BORDER = "#334155"
+PURPLE = "#A855F7"
+DEEP_PURPLE = "#6D28D9"
+CYAN = "#38BDF8"
+GREEN = "#22C55E"
+YELLOW = "#FACC15"
+PINK = "#F472B6"
+RED = "#FB7185"
+
+
+def font(size, bold=False):
+    candidates = [
+        "C:/Windows/Fonts/segoeuib.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for candidate in candidates:
+        try:
+            return ImageFont.truetype(candidate, size)
+        except OSError:
+            pass
+    return ImageFont.load_default()
+
+
+FONT_XS = font(14)
+FONT_SM = font(18)
+FONT = font(21)
+FONT_MD = font(25, True)
+FONT_LG = font(36, True)
+FONT_MONO = font(18)
+
+
+def text_w(draw, text, fnt):
+    return draw.textbbox((0, 0), text, font=fnt)[2]
+
+
+def wrap(draw, text, fnt, max_width):
+    words = text.split()
+    lines = []
+    current = ""
+    for word in words:
+        trial = f"{current} {word}".strip()
+        if not current or text_w(draw, trial, fnt) <= max_width:
+            current = trial
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def rounded(draw, box, fill, outline=None, width=1, radius=18):
+    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+
+
+def base_frame():
+    img = Image.new("RGBA", (W, H), BG_TOP)
     draw = ImageDraw.Draw(img)
+    for y in range(H):
+        t = y / (H - 1)
+        top = tuple(int(BG_TOP[i:i + 2], 16) for i in (1, 3, 5))
+        bottom = tuple(int(BG_BOTTOM[i:i + 2], 16) for i in (1, 3, 5))
+        rgb = tuple(int(top[i] * (1 - t) + bottom[i] * t) for i in range(3))
+        draw.line([(0, y), (W, y)], fill=rgb)
+
+    for x in range(0, W, 64):
+        draw.line([(x, 0), (x, H)], fill="#172033")
+    for y in range(0, H, 64):
+        draw.line([(0, y), (W, y)], fill="#172033")
+
     return img, draw
 
-def rounded_box(draw, x, y, w, h, color, r=8):
-    draw.rounded_rectangle([x, y, x+w, y+h], radius=r, fill=color)
 
-def pixel_squid(draw, cx, cy, scale=1.0, blink=False, arm_up=False, holding=False, tilt=0):
-    s = scale
-    # Magenta/red palette — Claude style
-    c_outer = "#CC2255"
-    c_body  = "#E63870"
-    c_highlight = "#FF5588"
-    c_glow  = "#FF8FB3"
+def load_mascot():
+    if not MASCOT_PATH.exists():
+        raise FileNotFoundError(f"Missing mascot asset: {MASCOT_PATH}")
+    return Image.open(MASCOT_PATH).convert("RGBA")
 
-    # Outer ring (Claude's circular badge style)
-    draw.ellipse([cx-32*s, cy-30*s, cx+32*s, cy+30*s], fill=c_outer)
 
-    # Inner body
-    draw.ellipse([cx-28*s, cy-26*s, cx+28*s, cy+26*s], fill=c_body)
+MASCOT = load_mascot()
 
-    # Highlight arc (top-left glow like Claude's gradient)
-    draw.ellipse([cx-22*s, cy-24*s, cx-6*s, cy-14*s], fill=c_highlight)
-    draw.ellipse([cx-20*s, cy-22*s, cx-2*s, cy-6*s], fill=c_glow)
 
-    # Tentacles (small, neat — emerging from below the ring)
-    for i, offset in enumerate([-16, -8, 0, 8, 16]):
-        tx = cx + offset * s
-        base_y = cy + 28 * s
-        wave = math.sin(i * 0.8 + tilt) * 5 * s
-        tip_x = tx + math.sin(i * 0.6 + tilt) * 3 * s
-        tip_y = base_y + 10 * s + wave
-        col = c_outer if i % 2 == 0 else c_body
-        draw.line([tx, base_y, tip_x, tip_y], fill=col, width=3)
-        draw.ellipse([tip_x-3*s, tip_y-3*s, tip_x+3*s, tip_y+3*s], fill=col)
+def paste_mascot(img, x, y, height=265, phase=0.0, mood="talk"):
+    bob = math.sin(phase) * 8
+    squash = 1 + math.sin(phase + 0.7) * 0.018
+    scale = height / MASCOT.height
+    w = int(MASCOT.width * scale * squash)
+    h = int(MASCOT.height * scale)
+    mascot = MASCOT.resize((w, h), Image.Resampling.LANCZOS)
 
-    # Eyes — simple dots (Claude-minimal)
-    eye_y = cy - 6*s
-    if blink:
-        draw.line([cx-12*s, eye_y, cx-6*s, eye_y], fill="#FFF", width=3)
-        draw.line([cx+6*s, eye_y, cx+12*s, eye_y], fill="#FFF", width=3)
-    else:
-        draw.ellipse([cx-14*s, eye_y-5*s, cx-4*s, eye_y+5*s], fill="white")
-        draw.ellipse([cx-12*s, eye_y-3*s, cx-6*s, eye_y+3*s], fill="#1A1A2E")
-        draw.ellipse([cx-11*s, eye_y-1*s, cx-8*s, eye_y+1*s], fill="white")
-        draw.ellipse([cx+4*s, eye_y-5*s, cx+14*s, eye_y+5*s], fill="white")
-        draw.ellipse([cx+6*s, eye_y-3*s, cx+12*s, eye_y+3*s], fill="#1A1A2E")
-        draw.ellipse([cx+8*s, eye_y-1*s, cx+11*s, eye_y+1*s], fill="white")
+    shadow = Image.new("RGBA", (w + 42, h + 42), (0, 0, 0, 0))
+    shadow.alpha_composite(mascot, (21, 18))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(14))
+    img.alpha_composite(shadow, (int(x - 12), int(y + bob + 16)))
+    img.alpha_composite(mascot, (int(x), int(y + bob)))
 
-    # Smile
-    draw.arc([cx-6*s, cy+2*s, cx+6*s, cy+12*s], 0, 180, fill="#FFF", width=2)
+    draw = ImageDraw.Draw(img)
+    if mood == "point":
+        pulse = 7 + int((math.sin(phase) + 1) * 4)
+        draw.ellipse([x + w + 34 - pulse, y + bob + h * 0.34 - pulse, x + w + 34 + pulse, y + bob + h * 0.34 + pulse], outline=CYAN, width=3)
+    elif mood == "celebrate":
+        for dx, dy, color in [(-20, -24, YELLOW), (w + 15, -12, CYAN), (w + 40, 42, PINK)]:
+            draw.ellipse([x + dx, y + bob + dy, x + dx + 10, y + bob + dy + 10], fill=color)
 
-    if arm_up:
-        arm_color = "#CC2255"
-        draw.ellipse([cx+28*s, cy-26*s, cx+36*s, cy-20*s], fill=arm_color)
-        draw.line([cx+32*s, cy-26*s, cx+32*s, cy-40*s], fill=arm_color, width=4)
-        if holding:
-            draw.ellipse([cx+26*s, cy-48*s, cx+38*s, cy-38*s], fill="#FF5588")
 
-def draw_terminal(draw, x, y, w, h, lines, cursor_line=-1, cursor_pos=-1):
-    rounded_box(draw, x, y, w, h, "#0D1117")
-    draw.rectangle([x, y, x+w, y+28], fill="#161B22")
-    for i, c in enumerate(["#FF5F56", "#FFBD2E", "#27C93F"]):
-        draw.ellipse([x+12+i*24, y+9, x+22+i*24, y+19], fill=c)
-    fy = y + 40
+def speech(draw, box, title, body, accent=PURPLE):
+    x1, y1, x2, y2 = box
+    rounded(draw, box, "#FFFFFF", "#E2E8F0", 2, 22)
+    draw.text((x1 + 24, y1 + 18), title, font=FONT_MD, fill="#0F172A")
+    y = y1 + 58
+    for line in wrap(draw, body, FONT, x2 - x1 - 48):
+        draw.text((x1 + 24, y), line, font=FONT, fill="#1E293B")
+        y += 29
+    draw.rectangle([x1, y2 - 8, x2, y2], fill=accent)
+
+
+def title(draw, eyebrow, headline, subhead):
+    tag_w = text_w(draw, eyebrow, FONT_XS) + 28
+    rounded(draw, [42, 28, 42 + tag_w, 58], "#211337", PURPLE, 1, 9)
+    draw.text((56, 35), eyebrow, font=FONT_XS, fill="#E9D5FF")
+    draw.text((42, 78), headline, font=FONT_LG, fill=INK)
+    y = 124
+    for line in wrap(draw, subhead, FONT_SM, 830):
+        draw.text((44, y), line, font=FONT_SM, fill=MUTED)
+        y += 25
+
+
+def card(draw, box, heading, bullets, accent=CYAN):
+    x1, y1, x2, y2 = box
+    rounded(draw, box, PANEL, BORDER, 2, 18)
+    draw.rectangle([x1, y1, x1 + 8, y2], fill=accent)
+    draw.text((x1 + 26, y1 + 18), heading, font=FONT_MD, fill=INK)
+    y = y1 + 62
+    for bullet in bullets:
+        draw.ellipse([x1 + 28, y + 8, x1 + 38, y + 18], fill=accent)
+        draw.text((x1 + 50, y), bullet, font=FONT_SM, fill=MUTED)
+        y += 32
+
+
+def terminal(draw, box, heading, lines, highlight=None):
+    x1, y1, x2, y2 = box
+    rounded(draw, box, PANEL_2, BORDER, 2, 18)
+    draw.rectangle([x1, y1, x2, y1 + 44], fill="#161B22")
+    for i, color in enumerate(["#FF5F56", "#FFBD2E", "#27C93F"]):
+        draw.ellipse([x1 + 18 + i * 24, y1 + 16, x1 + 30 + i * 24, y1 + 28], fill=color)
+    draw.text((x1 + 104, y1 + 12), heading, font=FONT_SM, fill=SOFT)
+
+    y = y1 + 62
     for i, line in enumerate(lines):
-        if i == cursor_line and cursor_pos >= 0:
-            prefix = line[:cursor_pos]
-            char = line[cursor_pos] if cursor_pos < len(line) else " "
-            suffix = line[cursor_pos+1:]
-            draw.text((x+14, fy), prefix, fill="#E6E6E6", font=font)
-            draw.text((x+14+font.getlength(prefix), fy), char, fill="#FF6B9D", font=font)
-            draw.text((x+14+font.getlength(prefix+char), fy), suffix, fill="#E6E6E6", font=font)
-        else:
-            c = "#8B949E" if line.startswith("#") or line.startswith("$") else "#E6E6E6"
-            if line.startswith("$"):
-                draw.text((x+14, fy), "$", fill="#27C93F", font=font)
-                draw.text((x+14+font.getlength("$ "), fy), line[2:], fill="#E6E6E6", font=font)
-            elif line.startswith("Ã¢Ëœâ€¦"):
-                draw.text((x+14, fy), line, fill="#27C93F", font=font)
-            elif line.startswith("Ãƒâ€”"):
-                draw.text((x+14, fy), line, fill="#FF5F56", font=font)
-            else:
-                draw.text((x+14, fy), line, fill=c, font=font)
-        fy += 22
+        color = INK
+        shown = line
+        if line.startswith("$"):
+            color = GREEN
+        elif line.startswith(">"):
+            color = CYAN
+        elif line.startswith("#"):
+            color = SOFT
+        elif line.startswith("!"):
+            color = YELLOW
+            shown = line[1:]
+        if highlight == i:
+            rounded(draw, [x1 + 14, y - 4, x2 - 14, y + 25], "#172554", "#2563EB", 1, 9)
+        draw.text((x1 + 24, y), shown, font=FONT_MONO, fill=color)
+        y += 24
 
-def draw_thought_bubble(draw, x, y, text_lines):
-    bw = max(font.getlength(l) for l in text_lines) + 30
-    bh = len(text_lines) * 24 + 20
-    bx = x - bw // 2
-    by = y - bh - 20
-    draw.ellipse([bx-8, by-8, bx+bw+8, by+bh+8], fill="white", outline="#CCC", width=2)
-    draw.polygon([x-6, by+bh+4, x+6, by+bh+4, x, y-10], fill="white", outline="#CCC")
-    fy = by + 12
-    for line in text_lines:
-        draw.text((bx+14, fy), line, fill="#2C3E50", font=font)
-        fy += 24
 
-def draw_skills_panel(draw, x, y, skills, highlight=-1):
-    rounded_box(draw, x, y, 160, 140, "#16213E")
-    draw.text((x+12, y+10), "   Skills", fill="#FF6B9D", font=font)
-    for i, (name, desc) in enumerate(skills):
-        iy = y + 36 + i * 32
-        if i == highlight:
-            draw.rounded_rectangle([x+8, iy-2, x+152, iy+26], radius=4, fill="#0F3460")
-        draw.text((x+14, iy), f"> {name}", fill="#E6E6E6" if i != highlight else "#FF6B9D", font=font_sm)
-        draw.text((x+14, iy+14), desc, fill="#8B949E", font=font_xs)
+SCENES = [
+    {
+        "eyebrow": "MEET THE MASCOT",
+        "headline": "Dynamic Skill Loader",
+        "subhead": "A universal MCP skill dispatcher for AI coding agents.",
+        "bubble": ("I am the skill dispatcher.", "Give me a task, and I load only the useful instructions."),
+        "card": ("What I do", [
+            "match the current task",
+            "load the right skill file",
+            "keep unrelated rules out",
+            "track active skills",
+            "clean up stale context",
+        ], PURPLE),
+    },
+    {
+        "eyebrow": "WHY IT EXISTS",
+        "headline": "Agents get messy when every rule is always loaded",
+        "subhead": "Design rules, framework notes, deployment steps, and command playbooks all compete for attention.",
+        "bubble": ("The fix is simple.", "Index everything, but load only what the task needs."),
+        "card": ("Without it", [
+            "prompt context gets bloated",
+            "wrong rules influence answers",
+            "team skills are hard to reuse",
+            "old instructions stay active",
+        ], RED),
+    },
+    {
+        "eyebrow": "STEP 1",
+        "headline": "Match the task",
+        "subhead": "The agent asks the MCP server which skills match the work in front of it.",
+        "bubble": ("I search names, descriptions, triggers, tags, and aliases.", "That keeps the match fast and focused."),
+        "terminal": ("match_skills", [
+            "$ node index.mjs --skills-dir ./skills --match \"GSAP hero section\"",
+            "",
+            "> matched: gsap-core",
+            "> matched: frontend-design",
+            "# only relevant skills are selected",
+        ], 0),
+    },
+    {
+        "eyebrow": "STEP 2",
+        "headline": "Load the details",
+        "subhead": "After matching, the agent loads the full instruction files for the current task.",
+        "bubble": ("I load the matched skills.", "Everything else stays unloaded."),
+        "terminal": ("MCP flow", [
+            "> match_skills({ query: \"GSAP hero section\" })",
+            "> get_skill({ name: \"gsap-core\" })",
+            "> get_skill({ name: \"frontend-design\" })",
+            "",
+            "# active: gsap-core, frontend-design",
+        ], 1),
+    },
+    {
+        "eyebrow": "FORMATS",
+        "headline": "Works with existing skill libraries",
+        "subhead": "You do not need to rewrite every instruction file before using the dispatcher.",
+        "bubble": ("I can read five formats.", "YAML skills, plain markdown, Gemini notes, commands, and Claude Code skills."),
+        "card": ("Supported formats", [
+            "YAML frontmatter skills",
+            "plain markdown instructions",
+            "Gemini-style heading + quote",
+            ".claude/commands/*.md",
+            ".claude/skills/*.md",
+        ], CYAN),
+    },
+    {
+        "eyebrow": "AGENT ROUTING",
+        "headline": "Each agent sees compatible skills",
+        "subhead": "The same skill repo can serve Claude Code, OpenCode, Cursor, Codex, Gemini CLI, Windsurf, Aider, and more.",
+        "bubble": ("Switch the agent mode.", "I filter formats so the client sees what it can actually use."),
+        "terminal": ("agent routing", [
+            "$ node index.mjs --skills-dir ./skills --agent cursor --list",
+            "> cursor sees: standard, plain",
+            "",
+            "$ node index.mjs --skills-dir ./skills --agent claude --list",
+            "> claude sees: standard, command, gemini, plain, claude",
+        ], 3),
+    },
+    {
+        "eyebrow": "LIFECYCLE",
+        "headline": "Unload stale skills when the task changes",
+        "subhead": "Active skills are scored against the current task so the agent knows what should stay and what should leave.",
+        "bubble": ("I flag stale skills.", "When you move to a new domain, old context gets marked for cleanup."),
+        "terminal": ("context lifecycle", [
+            "> set_task_context({ description: \"setup Supabase auth\" })",
+            "! stale: gsap-core        relevance 0.04",
+            "! stale: frontend-design  relevance 0.07",
+            "> unload_skill({ name: \"gsap-core\" })",
+            "> match_skills({ query: \"Supabase auth\" })",
+        ], 0),
+    },
+    {
+        "eyebrow": "GITHUB IMPORT",
+        "headline": "Import external skill repos",
+        "subhead": "Clone public GitHub skill libraries, index nested folders, and filter results by origin.",
+        "bubble": ("Team skill repos work too.", "Keep one skill repo and reuse it across many coding agents."),
+        "terminal": ("repo import", [
+            "$ node index.mjs --skills-dir ./skills \\",
+            "    --import-repo https://github.com/user/claude-skills",
+            "",
+            "> cloned safely",
+            "> indexed nested SKILL.md files",
+            "> origin: claude-skills",
+        ], 1),
+    },
+    {
+        "eyebrow": "SECURITY",
+        "headline": "Hardened for MCP and imported repos",
+        "subhead": "The loader validates the data it reads before returning instructions to an AI client.",
+        "bubble": ("Imported text is checked.", "Git imports, paths, YAML, and MCP messages all get validated."),
+        "card": ("Protections", [
+            "safe Git URL validation",
+            "path traversal checks",
+            "prototype pollution rejection",
+            "MCP JSON-RPC validation",
+            "input size limits",
+            "credential redaction in errors",
+        ], GREEN),
+    },
+    {
+        "eyebrow": "RESULT",
+        "headline": "Cleaner context. Better agent focus.",
+        "subhead": "Dynamic Skill Loader gives every AI coding agent a searchable skill library instead of a giant always-on prompt.",
+        "bubble": ("That is the whole trick.", "Load the right knowledge at the right time, then clean it up."),
+        "card": ("Why star it", [
+            "zero runtime dependencies",
+            "14 agent routing profiles",
+            "5 skill formats",
+            "external GitHub import",
+            "active skill lifecycle",
+            "166 passing tests",
+        ], PURPLE),
+        "footer": "github.com/farhanic017/dynamic-skill-loader",
+    },
+]
 
-def draw_loading_bar(draw, x, y, w, progress):
-    rounded_box(draw, x, y, w, 14, "#0D1117")
-    fw = int(w * progress)
-    if fw > 4:
-        draw.rounded_rectangle([x+2, y+2, x+2+fw, y+12], radius=4, fill="#27C93F")
-    draw.text((x + w//2 - 18, y-18), f"Loading... {int(progress*100)}%", fill="#8B949E", font=font_sm)
-
-# -- Font --
-try:
-    font = ImageFont.truetype("arial.ttf", 16)
-    font_sm = ImageFont.truetype("arial.ttf", 13)
-    font_xs = ImageFont.truetype("arial.ttf", 10)
-except:
-    font = ImageFont.load_default()
-    font_sm = font_xs = font
 
 frames = []
 durations = []
 
-def make_frame(fn):
-    img, draw = new_frame()
-    fn(img, draw)
+
+def render_scene(scene, subframe, total):
+    phase = (subframe / total) * math.tau
+    img, draw = base_frame()
+    title(draw, scene["eyebrow"], scene["headline"], scene["subhead"])
+
+    mascot_x = 56 + math.sin(phase * 0.8) * 6
+    mascot_y = 214
+    mood = "celebrate" if scene["eyebrow"] == "RESULT" else "point" if "terminal" in scene else "talk"
+    paste_mascot(img, mascot_x, mascot_y, 252, phase, mood)
+    draw = ImageDraw.Draw(img)
+
+    speech(draw, [260, 188, 626, 318], scene["bubble"][0], scene["bubble"][1], PURPLE)
+
+    if "terminal" in scene:
+        heading, lines, highlight = scene["terminal"]
+        terminal(draw, [288, 336, 904, 526], heading, lines, highlight)
+    else:
+        heading, bullets, accent = scene["card"]
+        card(draw, [648, 180, 904, 504], heading, bullets, accent)
+
+    if scene.get("footer"):
+        draw.text((420, 506), scene["footer"], font=FONT_SM, fill=CYAN)
+
     return img
 
-# Frame 1: Squid thinking
-def f1(img, draw):
-    pixel_squid(draw, 100, 180, 1.2)
-    draw_thought_bubble(draw, 100, 120, ["build a hero section", "with GSAP animations"])
-    draw.text((180, 30), "What skill do I need?", fill="#E6E6E6", font=font)
-    draw.text((180, 54), "Ask the skill dispatcher!", fill="#8B949E", font=font_sm)
-frames.append(make_frame(f1))
-durations.append(2000)
 
-# Frame 2: Squid at terminal typing
-def f2(img, draw):
-    pixel_squid(draw, 60, 185, 0.9, arm_up=True)
-    draw_terminal(draw, 150, 25, 290, 200, [
-        "$ skill-dispatcher --skills-dir ./skills",
-        "",
-        "# MCP server ready!",
-        "",
-        'match_skills("gsap hero animation")',
-        "",
-    ], cursor_line=4, cursor_pos=35)
-    draw.text((170, 240), "Searching skills...", fill="#8B949E", font=font_sm)
-frames.append(make_frame(f2))
-durations.append(2500)
+for scene in SCENES:
+    for i in range(6):
+        frames.append(render_scene(scene, i, 6).convert("P", palette=Image.Palette.ADAPTIVE, colors=160))
+        durations.append(560 if i < 5 else 1600)
 
-# Frame 3: Matched skills shown
-def f3(img, draw):
-    pixel_squid(draw, 70, 185, 0.9)
-    draw_terminal(draw, 160, 25, 290, 130, [
-        "  2 skill(s) matched!",
-        "",
-        "  gsap-core",
-        "    Triggers: gsap, tween, easing",
-        "  frontend-design",
-        "    Triggers: css, layout, design",
-    ])
-    draw_skills_panel(draw, 10, 10, [
-        ("gsap-core", "GSAP animation lib"),
-        ("frontend-design", "UI/UX patterns"),
-    ], highlight=0)
-    draw.text((20, 165), "Matched!", fill="#27C93F", font=font_sm)
-    draw.text((20, 190), "Call get_skill() to load", fill="#8B949E", font=font_sm)
-frames.append(make_frame(f3))
-durations.append(3000)
-
-# Frame 4: Loading a skill
-def f4(img, draw):
-    pixel_squid(draw, 60, 188, 0.9, arm_up=True)
-    draw_loading_bar(draw, 170, 65, 250, 0.65)
-    draw_terminal(draw, 170, 95, 250, 95, [
-        'get_skill("gsap-core")',
-        "",
-        "> Loading gsap-core...",
-        "> Instructions loaded!",
-    ])
-    draw.text((170, 200), "gsap-core loaded into context", fill="#27C93F", font=font_sm)
-frames.append(make_frame(f4))
-durations.append(2500)
-
-# Frame 5: Happy squid with skills loaded
-def f5(img, draw):
-    pixel_squid(draw, 70, 175, 1.3)
-    skills_data = [
-        ("gsap-core", 230, 20),
-        ("frontend-design", 300, 65),
-        ("scroll-trigger", 250, 110),
-    ]
-    for name, sx, sy in skills_data:
-        rounded_box(draw, sx, sy, 130, 34, "#0F3460")
-        draw.text((sx+10, sy+5), f"  {name}", fill="#27C93F", font=font_sm)
-        draw.text((sx+10, sy+20), "Ready in context", fill="#8B949E", font=font_xs)
-
-    draw.text((80, 15), "Skills loaded! Let's code!", fill="#FF6B9D", font=font)
-    draw.text((100, 42), "Only what you need, when you need it", fill="#8B949E", font=font_sm)
-frames.append(make_frame(f5))
-durations.append(3500)
-
-# Frame 6: Terminal showing it works
-def f6(img, draw):
-    pixel_squid(draw, 60, 185, 0.9, blink=True)
-    draw_terminal(draw, 150, 20, 290, 210, [
-        "$ skill-dispatcher --skills-dir ./skills",
-        "",
-        "# 3 skills loaded",
-        "# 4 MCP tools ready",
-        "",
-        "> match_skills(query)",
-        "> get_skill(name)",
-        "> list_skills()",
-        "> unload_skill(name)",
-        "",
-        "Ready for action!",
-    ])
-    draw.text((140, 245), "Drop this repo URL into any AI client", fill="#FF6B9D", font=font_sm)
-frames.append(make_frame(f6))
-durations.append(3000)
-
-# -- Save --
-out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skill-dispatcher-demo.gif")
+OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 frames[0].save(
-    out_path,
+    OUT_PATH,
     save_all=True,
     append_images=frames[1:],
     duration=durations,
     loop=0,
     disposal=2,
-    optimize=False,
+    optimize=True,
 )
-print(f"Created {out_path}")
-print(f"  {len(frames)} frames, {W}x{H}")
-for i, d in enumerate(durations):
-    print(f"  Frame {i+1}: {d}ms")
+
+print(f"Created {OUT_PATH}")
+print(f"  scenes: {len(SCENES)}")
+print(f"  frames: {len(frames)}")
+print(f"  size: {W}x{H}")
+print(f"  duration: {sum(durations) / 1000:.1f}s")
