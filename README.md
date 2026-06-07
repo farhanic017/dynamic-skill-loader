@@ -9,7 +9,7 @@
 
 Dynamic Skill Loader is a zero-dependency Node.js MCP server and CLI for developers building with Claude Code, OpenCode, Cursor, Windsurf, Aider, Gemini CLI, Codex, Antigravity, Kilo Code, Augment, Hermes, Mistral Vibe, and other MCP-compatible coding assistants.
 
-![Dynamic Skill Loader demo](skill-dispatcher-demo.gif)
+![Dynamic Skill Loader demo](skill-dispatcher-demo.webp)
 
 ## Why Developers Star It
 
