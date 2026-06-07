@@ -1,9 +1,13 @@
+# Dynamic Skill Loader
+
 [![License](https://img.shields.io/badge/license-GPLv3-purple)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](package.json)
 [![MCP](https://img.shields.io/badge/MCP-server-blue)](https://modelcontextprotocol.io/)
+[![Author](https://img.shields.io/badge/author-Farhan%20Dhrubo-orange)](https://github.com/farhanic017)
+[![Version](https://img.shields.io/badge/version-v3-blue)](package.json)
 [![Tests](https://img.shields.io/badge/tests-166%20passed-brightgreen)](aggressive-test.mjs)
 
-# Dynamic Skill Loader
+> Created by [Farhan Dhrubo](https://github.com/farhanic017) - [Patreon](https://www.patreon.com/Farhanic) - [Submit an issue](https://github.com/farhanic017/dynamic-skill-loader/issues)
 
 **Universal MCP skill dispatcher for AI coding agents.** Load Claude Code skills, OpenCode skills, Cursor rules, Gemini-style markdown, command files, and external GitHub skill repos on demand without bloating every prompt.
 
