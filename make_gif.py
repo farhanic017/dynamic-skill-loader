@@ -111,13 +111,100 @@ def load_mascot():
 MASCOT = load_mascot()
 
 
+def paste_part(canvas, part, x, y, angle=0):
+    if angle:
+        part = part.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+    canvas.alpha_composite(part, (int(x), int(y)))
+
+
+def crop_part(source, mask_box):
+    x1, y1, x2, y2 = mask_box
+    part = source.crop(mask_box)
+    return part, x1, y1
+
+
+def animated_mascot_source(phase=0.0, mood="talk"):
+    source = MASCOT.copy()
+    w, h = source.size
+    alpha = source.getchannel("A")
+    base = source.copy()
+    bp = base.load()
+
+    left_box = (0, int(h * 0.28), int(w * 0.30), int(h * 0.62))
+    right_box = (int(w * 0.70), int(h * 0.28), w, int(h * 0.62))
+    tentacle_box = (int(w * 0.18), int(h * 0.51), int(w * 0.82), h)
+
+    # Remove movable appendages from the base layer, then recompose them with
+    # small transforms so the real mascot artwork moves instead of being redrawn.
+    for x1, y1, x2, y2 in [left_box, right_box, tentacle_box]:
+        for yy in range(y1, y2):
+            for xx in range(x1, x2):
+                if alpha.getpixel((xx, yy)) > 0:
+                    bp[xx, yy] = (0, 0, 0, 0)
+
+    left, lx, ly = crop_part(source, left_box)
+    right, rx, ry = crop_part(source, right_box)
+    tentacles, tx, ty = crop_part(source, tentacle_box)
+
+    arm_angle = math.sin(phase) * 9
+    tentacle_dx = math.sin(phase + 1.1) * 6
+    tentacle_dy = math.cos(phase * 1.2) * 3
+    paste_part(base, left, lx + math.sin(phase + 0.4) * 4, ly + math.cos(phase) * 3, -arm_angle)
+    paste_part(base, right, rx + math.sin(phase + 2.4) * 4, ry + math.cos(phase + 1.0) * 3, arm_angle)
+    paste_part(base, tentacles, tx + tentacle_dx, ty + tentacle_dy, math.sin(phase * 0.8) * 2.5)
+
+    draw = ImageDraw.Draw(base)
+    face = (
+        int(w * 0.24),
+        int(h * 0.27),
+        int(w * 0.78),
+        int(h * 0.43),
+    )
+    face_color = source.getpixel((int(w * 0.50), int(h * 0.34)))[:3]
+
+    # Hide the original eyes with small purple patches, then draw animated eyes.
+    draw.rounded_rectangle([int(w * 0.25), int(h * 0.30), int(w * 0.43), int(h * 0.42)], radius=8, fill=face_color)
+    draw.rounded_rectangle([int(w * 0.56), int(h * 0.30), int(w * 0.74), int(h * 0.42)], radius=8, fill=face_color)
+
+    expr_cycle = int((phase % math.tau) / math.tau * 4)
+    if mood == "celebrate":
+        expr_cycle = 0
+    elif mood == "point":
+        expr_cycle = (expr_cycle + 1) % 4
+
+    lw = max(5, int(w * 0.022))
+    left_eye = (int(w * 0.33), int(h * 0.36))
+    right_eye = (int(w * 0.64), int(h * 0.36))
+    if expr_cycle == 0:
+        # Happy upturned eyes, close to the original mascot expression.
+        for cx, cy in [left_eye, right_eye]:
+            draw.line([(cx - 22, cy + 8), (cx - 8, cy - 12), (cx + 8, cy - 12), (cx + 22, cy + 8)], fill="#050505", width=lw, joint="curve")
+    elif expr_cycle == 1:
+        # Blink.
+        for cx, cy in [left_eye, right_eye]:
+            draw.line([(cx - 22, cy), (cx + 22, cy)], fill="#050505", width=lw)
+    elif expr_cycle == 2:
+        # Focused dots.
+        for cx, cy in [left_eye, right_eye]:
+            draw.ellipse([cx - 13, cy - 13, cx + 13, cy + 13], fill="#050505")
+    else:
+        # Curious asymmetry.
+        cx, cy = left_eye
+        draw.line([(cx - 22, cy + 7), (cx - 8, cy - 11), (cx + 8, cy - 11), (cx + 22, cy + 7)], fill="#050505", width=lw, joint="curve")
+        cx, cy = right_eye
+        draw.ellipse([cx - 13, cy - 13, cx + 13, cy + 13], fill="#050505")
+
+    return base
+
+
 def paste_mascot(img, x, y, height=265, phase=0.0, mood="talk"):
     bob = math.sin(phase) * 8
     squash = 1 + math.sin(phase + 0.7) * 0.018
-    scale = height / MASCOT.height
-    w = int(MASCOT.width * scale * squash)
-    h = int(MASCOT.height * scale)
-    mascot = MASCOT.resize((w, h), Image.Resampling.LANCZOS)
+    source = animated_mascot_source(phase, mood)
+    scale = height / source.height
+    w = int(source.width * scale * squash)
+    h = int(source.height * scale)
+    mascot = source.resize((w, h), Image.Resampling.LANCZOS)
 
     shadow = Image.new("RGBA", (w + 42, h + 42), (0, 0, 0, 0))
     shadow.alpha_composite(mascot, (21, 18))
@@ -137,11 +224,19 @@ def paste_mascot(img, x, y, height=265, phase=0.0, mood="talk"):
 def speech(draw, box, title, body, accent=PURPLE):
     x1, y1, x2, y2 = box
     rounded(draw, box, "#FFFFFF", "#E2E8F0", 2, 22)
-    draw.text((x1 + 24, y1 + 18), title, font=FONT_MD, fill="#0F172A")
-    y = y1 + 58
-    for line in wrap(draw, body, FONT, x2 - x1 - 48):
-        draw.text((x1 + 24, y), line, font=FONT, fill="#1E293B")
-        y += 29
+    title_lines = wrap(draw, title, FONT_MD, x2 - x1 - 48)
+    y = y1 + 18
+    for line in title_lines[:2]:
+        draw.text((x1 + 24, y), line, font=FONT_MD, fill="#0F172A")
+        y += 30
+    y += 4
+    body_font = FONT_SM
+    max_body_y = y2 - 30
+    for line in wrap(draw, body, body_font, x2 - x1 - 48):
+        if y + 22 > max_body_y:
+            break
+        draw.text((x1 + 24, y), line, font=body_font, fill="#1E293B")
+        y += 24
     draw.rectangle([x1, y2 - 8, x2, y2], fill=accent)
 
 
@@ -177,7 +272,11 @@ def terminal(draw, box, heading, lines, highlight=None):
     draw.text((x1 + 104, y1 + 12), heading, font=FONT_SM, fill=SOFT)
 
     y = y1 + 62
+    max_y = y2 - 22
+    max_width = x2 - x1 - 48
     for i, line in enumerate(lines):
+        if y > max_y:
+            break
         color = INK
         shown = line
         if line.startswith("$"):
@@ -189,9 +288,14 @@ def terminal(draw, box, heading, lines, highlight=None):
         elif line.startswith("!"):
             color = YELLOW
             shown = line[1:]
+        text_font = FONT_MONO
+        if text_w(draw, shown, text_font) > max_width:
+            text_font = FONT_XS
+        while text_w(draw, shown, text_font) > max_width and len(shown) > 8:
+            shown = shown[:-2] + "..."
         if highlight == i:
             rounded(draw, [x1 + 14, y - 4, x2 - 14, y + 25], "#172554", "#2563EB", 1, 9)
-        draw.text((x1 + 24, y), shown, font=FONT_MONO, fill=color)
+        draw.text((x1 + 24, y), shown, font=text_font, fill=color)
         y += 24
 
 
@@ -225,7 +329,7 @@ SCENES = [
         "eyebrow": "STEP 1",
         "headline": "Match the task",
         "subhead": "The agent asks the MCP server which skills match the work in front of it.",
-        "bubble": ("I search names, descriptions, triggers, tags, and aliases.", "That keeps the match fast and focused."),
+        "bubble": ("I search skill metadata.", "Names, descriptions, triggers, tags, and aliases keep matches focused."),
         "terminal": ("match_skills", [
             "$ node index.mjs --skills-dir ./skills --match \"GSAP hero section\"",
             "",
@@ -251,7 +355,7 @@ SCENES = [
         "eyebrow": "FORMATS",
         "headline": "Works with existing skill libraries",
         "subhead": "You do not need to rewrite every instruction file before using the dispatcher.",
-        "bubble": ("I can read five formats.", "YAML skills, plain markdown, Gemini notes, commands, and Claude Code skills."),
+        "bubble": ("Five formats work.", "YAML, markdown, Gemini notes, commands, and Claude Code skills."),
         "card": ("Supported formats", [
             "YAML frontmatter skills",
             "plain markdown instructions",
@@ -277,7 +381,7 @@ SCENES = [
         "eyebrow": "LIFECYCLE",
         "headline": "Unload stale skills when the task changes",
         "subhead": "Active skills are scored against the current task so the agent knows what should stay and what should leave.",
-        "bubble": ("I flag stale skills.", "When you move to a new domain, old context gets marked for cleanup."),
+        "bubble": ("I flag stale skills.", "When the task changes, old context gets marked for cleanup."),
         "terminal": ("context lifecycle", [
             "> set_task_context({ description: \"setup Supabase auth\" })",
             "! stale: gsap-core        relevance 0.04",
@@ -290,7 +394,7 @@ SCENES = [
         "eyebrow": "GITHUB IMPORT",
         "headline": "Import external skill repos",
         "subhead": "Clone public GitHub skill libraries, index nested folders, and filter results by origin.",
-        "bubble": ("Team skill repos work too.", "Keep one skill repo and reuse it across many coding agents."),
+        "bubble": ("Team repos work too.", "One skill repo can serve many coding agents."),
         "terminal": ("repo import", [
             "$ node index.mjs --skills-dir ./skills \\",
             "    --import-repo https://github.com/user/claude-skills",
