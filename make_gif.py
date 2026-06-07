@@ -21,6 +21,11 @@ MASCOT_PATH = ROOT / "assets" / "mascot.png"
 OUT_PATH = ROOT / "skill-dispatcher-demo.gif"
 
 W, H = 960, 540
+TARGET_FPS = 60
+SPEED_MULTIPLIER = 3
+ORIGINAL_SCENE_MS = 4400
+SCENE_MS = ORIGINAL_SCENE_MS / SPEED_MULTIPLIER
+FRAMES_PER_SCENE = round(SCENE_MS / (1000 / TARGET_FPS))
 BG_TOP = "#070A12"
 BG_BOTTOM = "#121827"
 INK = "#F8FAFC"
@@ -431,6 +436,12 @@ frames = []
 durations = []
 
 
+def frame_duration_ms(frame_index):
+    # GIF frame delays are stored in centiseconds. Alternating 10/20/20ms
+    # gives an average of 16.67ms, matching 60 fps as closely as GIF allows.
+    return [10, 20, 20][frame_index % 3]
+
+
 def render_scene(scene, subframe, total):
     phase = (subframe / total) * math.tau
     img, draw = base_frame()
@@ -458,9 +469,14 @@ def render_scene(scene, subframe, total):
 
 
 for scene in SCENES:
-    for i in range(6):
-        frames.append(render_scene(scene, i, 6).convert("P", palette=Image.Palette.ADAPTIVE, colors=160))
-        durations.append(560 if i < 5 else 1600)
+    for i in range(FRAMES_PER_SCENE):
+        frame_index = len(frames)
+        frame = render_scene(scene, i, FRAMES_PER_SCENE)
+        # Keeps GIF encoders from coalescing near-identical animation frames,
+        # preserving the requested 60 fps timing without adding visible UI.
+        ImageDraw.Draw(frame).line([(frame_index % W, H - 2), (frame_index % W, H - 1)], fill=CYAN)
+        frames.append(frame.convert("P", palette=Image.Palette.ADAPTIVE, colors=160))
+        durations.append(frame_duration_ms(len(frames) - 1))
 
 OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 frames[0].save(
@@ -470,7 +486,7 @@ frames[0].save(
     duration=durations,
     loop=0,
     disposal=2,
-    optimize=True,
+    optimize=False,
 )
 
 print(f"Created {OUT_PATH}")
@@ -478,3 +494,5 @@ print(f"  scenes: {len(SCENES)}")
 print(f"  frames: {len(frames)}")
 print(f"  size: {W}x{H}")
 print(f"  duration: {sum(durations) / 1000:.1f}s")
+print(f"  target speed: {SPEED_MULTIPLIER}x")
+print(f"  target fps: {TARGET_FPS}")
